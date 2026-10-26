@@ -1,0 +1,77 @@
+# Built application files
+*.apk
+*.aar
+*.ap_
+*.aab
+
+# Keep local library dependencies in libs/ (e.g. mpv-android-lib-v1.0.0.aar)
+!libs/*.aar
+!libs/*.jar
+
+# Files for the ART/Dalvik VM
+*.dex
+
+# Java class files
+*.class
+
+# Generated files
+bin/
+gen/
+out/
+build/
+app/build/
+**/build/
+
+# Gradle files
+.gradle/
+.kotlin/
+
+# Local configuration file (SDK path, NDK path, etc.)
+local.properties
+
+# Proguard / R8 generated folders
+proguard/
+
+# Log files
+*.log
+
+# Android Studio & IntelliJ IDEA
+*.iml
+.idea/
+.idea/libraries/
+.idea/modules.xml
+.idea/workspace.xml
+.idea/navEditor.xml
+.idea/assetWizardSettings.xml
+.idea/shelf/
+.idea/caches/
+
+# Android Studio temporary captures & navigation
+captures/
+.navigation/
+
+# VS Code
+.vscode/
+
+# Keystore files & credentials
+*.jks
+*.keystore
+
+# Native build / NDK artifacts
+.externalNativeBuild/
+.cxx/
+ndk-build/
+
+# OS-specific files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# Testing media & temporary scratch files
+screenshot.png
+test.mp4
