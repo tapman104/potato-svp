@@ -64,6 +64,7 @@ open class MpvEngine(private val appContext: Context) {
     private fun observeProgressProperties() {
         MPVLib.observeProperty("time-pos", MPVLib.MpvFormat.MPV_FORMAT_DOUBLE)
         MPVLib.observeProperty("duration", MPVLib.MpvFormat.MPV_FORMAT_DOUBLE)
+        MPVLib.observeProperty("pause", MPVLib.MpvFormat.MPV_FORMAT_FLAG)
     }
 
     /**

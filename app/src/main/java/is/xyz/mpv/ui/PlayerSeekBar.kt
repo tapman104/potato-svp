@@ -25,6 +25,7 @@ fun PlayerSeekBar(
     durationSec: Double,
     enabled: Boolean,
     onSeek: (Double) -> Unit,
+    onSeekStarted: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     var isDragging by remember { mutableStateOf(false) }
@@ -54,6 +55,9 @@ fun PlayerSeekBar(
         Slider(
             value = sliderValue,
             onValueChange = { newValue ->
+                if (!isDragging) {
+                    onSeekStarted?.invoke()
+                }
                 isDragging = true
                 dragPosition = newValue
             },

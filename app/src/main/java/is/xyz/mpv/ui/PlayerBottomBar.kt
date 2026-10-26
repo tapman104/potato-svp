@@ -1,5 +1,6 @@
 package `is`.xyz.mpv.ui
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -26,6 +27,7 @@ fun PlayerBottomBar(
     durationSec: Double,
     onPlayPauseClick: () -> Unit,
     onSeek: (Double) -> Unit,
+    onSeekStarted: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     Surface(
@@ -44,10 +46,12 @@ fun PlayerBottomBar(
                 durationSec = durationSec,
                 enabled = isEnabled,
                 onSeek = onSeek,
+                onSeekStarted = onSeekStarted,
                 modifier = Modifier.fillMaxWidth()
             )
 
             Row(
+                horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.fillMaxWidth()
             ) {

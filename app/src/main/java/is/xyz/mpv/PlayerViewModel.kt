@@ -25,6 +25,9 @@ data class PlayerUiState(
     val isPlaying: Boolean = false,
     val isEngineReady: Boolean = false,
     val currentFileName: String? = null,
+)
+
+data class PlaybackProgress(
     val positionSec: Double = 0.0,
     val durationSec: Double = 0.0,
 )
@@ -51,6 +54,9 @@ class PlayerViewModel(private val appContext: Context) : ViewModel(),
 
     private val _uiState = MutableStateFlow(PlayerUiState())
     val uiState: StateFlow<PlayerUiState> = _uiState.asStateFlow()
+
+    private val _playbackProgress = MutableStateFlow(PlaybackProgress())
+    val playbackProgress: StateFlow<PlaybackProgress> = _playbackProgress.asStateFlow()
 
     private val _videoGeometry = MutableStateFlow(VideoGeometry())
 
@@ -87,8 +93,7 @@ class PlayerViewModel(private val appContext: Context) : ViewModel(),
             _videoGeometry.update { geometry }
         }
         engine.onPlaybackProgressChanged = { pos, dur ->
-            Log.i(TAG, "Playback progress: pos=$pos, dur=$dur")
-            _uiState.update { it.copy(positionSec = pos, durationSec = dur) }
+            _playbackProgress.update { PlaybackProgress(positionSec = pos, durationSec = dur) }
         }
         initEngine()
     }
@@ -119,14 +124,13 @@ class PlayerViewModel(private val appContext: Context) : ViewModel(),
         val name = displayName ?: UriUtils.getDisplayNameFromPath(path)
         Log.i(TAG, "loadFile: path=$path, name=$name")
         _uiState.update { it.copy(currentFileName = name) }
+        _playbackProgress.value = PlaybackProgress()
         engine.playFile(path)
     }
 
     fun togglePlayPause() {
-        val paused = MPVLib.getPropertyBoolean("pause") ?: true
+        val paused = MPVLib.getPropertyBoolean("pause") ?: return
         MPVLib.setPropertyBoolean("pause", !paused)
-        // Optimistic update; the observer will confirm it.
-        _uiState.update { it.copy(isPlaying = paused) }
     }
 
     fun seekTo(positionSec: Double) {
