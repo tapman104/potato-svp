@@ -24,18 +24,27 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
+import `is`.xyz.mpv.ui.AudioTrackDialog
 import `is`.xyz.mpv.ui.PlayerBottomBar
 import `is`.xyz.mpv.ui.PlayerTopBar
+import `is`.xyz.mpv.ui.SubtitleTrackDialog
 import `is`.xyz.mpv.ui.VideoSurface
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 
+private enum class TrackDialogType {
+    NONE,
+    AUDIO,
+    SUBTITLE
+}
+
 @Composable
 fun PlayScreen(
     onOpenFileClick: (() -> Unit)? = null,
     onBackClick: (() -> Unit)? = null,
+    onControlsVisibilityChanged: ((Boolean) -> Unit)? = null,
     viewModel: PlayerViewModel = viewModel(
         factory = PlayerViewModel.factory(
             LocalContext.current
@@ -47,6 +56,7 @@ fun PlayScreen(
     val backDispatcher = LocalOnBackPressedDispatcherOwner.current?.onBackPressedDispatcher
 
     var controlsVisible by remember { mutableStateOf(true) }
+    var activeDialog by remember { mutableStateOf(TrackDialogType.NONE) }
     val coroutineScope = rememberCoroutineScope()
     var hideJob by remember { mutableStateOf<Job?>(null) }
 
@@ -58,8 +68,18 @@ fun PlayScreen(
         }
     }
 
+    LaunchedEffect(controlsVisible) {
+        onControlsVisibilityChanged?.invoke(controlsVisible)
+    }
+
     LaunchedEffect(Unit) {
         resetHideTimer()
+    }
+
+    LaunchedEffect(activeDialog) {
+        if (activeDialog != TrackDialogType.NONE) {
+            hideJob?.cancel()
+        }
     }
 
     val handleBack: () -> Unit = onBackClick ?: {
@@ -92,8 +112,10 @@ fun PlayScreen(
                 .pointerInput(Unit) {
                     detectTapGestures(
                         onTap = {
-                            controlsVisible = !controlsVisible
-                            if (controlsVisible) resetHideTimer()
+                            if (activeDialog == TrackDialogType.NONE) {
+                                controlsVisible = !controlsVisible
+                                if (controlsVisible) resetHideTimer()
+                            }
                         }
                     )
                 }
@@ -110,6 +132,7 @@ fun PlayScreen(
         ) {
             PlayerTopBar(
                 title = uiState.currentFileName,
+                isEngineReady = uiState.isEngineReady,
                 onBackClick = {
                     resetHideTimer()
                     handleBack()
@@ -119,6 +142,14 @@ fun PlayScreen(
                         resetHideTimer()
                         onClick()
                     }
+                },
+                onAudioTrackClick = {
+                    hideJob?.cancel()
+                    activeDialog = TrackDialogType.AUDIO
+                },
+                onSubtitleTrackClick = {
+                    hideJob?.cancel()
+                    activeDialog = TrackDialogType.SUBTITLE
                 },
                 modifier = Modifier.fillMaxWidth()
             )
@@ -150,6 +181,41 @@ fun PlayScreen(
                 },
                 modifier = Modifier.fillMaxWidth()
             )
+        }
+
+        // Track Selection Dialogs
+        when (activeDialog) {
+            TrackDialogType.AUDIO -> {
+                AudioTrackDialog(
+                    tracks = uiState.trackState.audioTracks,
+                    selectedTrackId = uiState.trackState.selectedAudioId,
+                    onSelect = { trackId ->
+                        viewModel.selectAudioTrack(trackId)
+                        activeDialog = TrackDialogType.NONE
+                        resetHideTimer()
+                    },
+                    onDismissRequest = {
+                        activeDialog = TrackDialogType.NONE
+                        resetHideTimer()
+                    }
+                )
+            }
+            TrackDialogType.SUBTITLE -> {
+                SubtitleTrackDialog(
+                    tracks = uiState.trackState.subtitleTracks,
+                    selectedTrackId = uiState.trackState.selectedSubtitleId,
+                    onSelect = { trackId ->
+                        viewModel.selectSubtitleTrack(trackId)
+                        activeDialog = TrackDialogType.NONE
+                        resetHideTimer()
+                    },
+                    onDismissRequest = {
+                        activeDialog = TrackDialogType.NONE
+                        resetHideTimer()
+                    }
+                )
+            }
+            TrackDialogType.NONE -> Unit
         }
     }
 }

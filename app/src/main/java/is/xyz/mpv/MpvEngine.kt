@@ -3,6 +3,9 @@ package `is`.xyz.mpv
 import android.content.Context
 import android.util.Log
 import android.view.Surface
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 /**
  * Snapshot of video geometry, as last reported by mpv.
@@ -14,6 +17,16 @@ data class VideoGeometry(
     val rotationDegrees: Int = 0,
 )
 
+/**
+ * Explicit lifecycle status for the native mpv engine.
+ */
+sealed interface EngineStatus {
+    data object NotStarted : EngineStatus
+    data object Starting : EngineStatus
+    data object Ready : EngineStatus
+    data class Failed(val reason: String) : EngineStatus
+}
+
 open class MpvEngine(private val appContext: Context) {
 
     /** Called whenever mpv reports a change to width, height, or rotation. */
@@ -22,9 +35,21 @@ open class MpvEngine(private val appContext: Context) {
     /** Called whenever mpv reports a change to position or duration. */
     var onPlaybackProgressChanged: ((positionSec: Double, durationSec: Double) -> Unit)? = null
 
+    private val _status = MutableStateFlow<EngineStatus>(EngineStatus.NotStarted)
+    val status: StateFlow<EngineStatus> = _status.asStateFlow()
+
+    val isReady: Boolean get() = _status.value is EngineStatus.Ready
+
+    private val lock = Any()
     private var currentGeometry = VideoGeometry()
     private var currentPositionSec: Double = 0.0
     private var currentDurationSec: Double = 0.0
+
+    private var isSurfaceAttached: Boolean = false
+    private var pendingSurface: Surface? = null
+    private var pendingSurfaceSize: Pair<Int, Int>? = null
+    private var filePath: String? = null
+    private var voInUse: String = "gpu"
 
     /**
      * Initialize libmpv.
@@ -32,27 +57,48 @@ open class MpvEngine(private val appContext: Context) {
      * Call this once before the view is shown.
      */
     fun initialize(configDir: String, cacheDir: String) {
-        MPVLib.create(appContext.applicationContext)
+        synchronized(lock) {
+            if (_status.value is EngineStatus.Ready || _status.value is EngineStatus.Starting) {
+                Log.w(TAG, "initialize called when engine is already ${_status.value}")
+                return
+            }
+            _status.value = EngineStatus.Starting
 
-        /* set normal options (user-supplied config can override) */
-        MPVLib.setOptionString("config", "yes")
-        MPVLib.setOptionString("config-dir", configDir)
-        for (opt in arrayOf("gpu-shader-cache-dir", "icc-cache-dir"))
-            MPVLib.setOptionString(opt, cacheDir)
-        initOptions()
+            try {
+                MPVLib.create(appContext.applicationContext)
 
-        MPVLib.init()
+                /* set normal options (user-supplied config can override) */
+                MPVLib.setOptionString("config", "yes")
+                MPVLib.setOptionString("config-dir", configDir)
+                for (opt in arrayOf("gpu-shader-cache-dir", "icc-cache-dir")) {
+                    MPVLib.setOptionString(opt, cacheDir)
+                }
+                initOptions()
 
-        /* set hardcoded options */
-        postInitOptions()
-        // could mess up VO init before surfaceCreated() is called
-        MPVLib.setOptionString("force-window", "no")
-        // need to idle at least once for playFile() logic to work
-        MPVLib.setOptionString("idle", "once")
+                MPVLib.init()
 
-        observeProperties()
-        observeGeometryProperties()
-        observeProgressProperties()
+                /* set hardcoded options */
+                postInitOptions()
+                // could mess up VO init before surfaceCreated() is called
+                MPVLib.setOptionString("force-window", "no")
+                // need to idle at least once for playFile() logic to work
+                MPVLib.setOptionString("idle", "once")
+
+                observeProperties()
+                observeGeometryProperties()
+                observeProgressProperties()
+                observeTrackProperties()
+
+                _status.value = EngineStatus.Ready
+                Log.i(TAG, "libmpv initialized successfully")
+                flushPendingLocked()
+            } catch (e: Throwable) {
+                val reason = e.message ?: "Unknown initialization error"
+                Log.e(TAG, "libmpv initialization failed: $reason", e)
+                _status.value = EngineStatus.Failed(reason)
+                throw e
+            }
+        }
     }
 
     private fun observeGeometryProperties() {
@@ -65,6 +111,71 @@ open class MpvEngine(private val appContext: Context) {
         MPVLib.observeProperty("time-pos", MPVLib.MpvFormat.MPV_FORMAT_DOUBLE)
         MPVLib.observeProperty("duration", MPVLib.MpvFormat.MPV_FORMAT_DOUBLE)
         MPVLib.observeProperty("pause", MPVLib.MpvFormat.MPV_FORMAT_FLAG)
+    }
+
+    private fun observeTrackProperties() {
+        MPVLib.observeProperty("track-list", MPVLib.MpvFormat.MPV_FORMAT_NODE)
+        MPVLib.observeProperty("aid", MPVLib.MpvFormat.MPV_FORMAT_STRING)
+        MPVLib.observeProperty("sid", MPVLib.MpvFormat.MPV_FORMAT_STRING)
+    }
+
+    private fun flushPendingLocked() {
+        pendingSurfaceSize?.let { (w, h) ->
+            MPVLib.setPropertyString("android-surface-size", "${w}x$h")
+            pendingSurfaceSize = null
+        }
+
+        val surfaceToAttach = pendingSurface
+        if (surfaceToAttach != null) {
+            pendingSurface = null
+            attachSurfaceLocked(surfaceToAttach)
+        } else if (isSurfaceAttached && filePath != null) {
+            val path = filePath as String
+            filePath = null
+            MPVLib.command(arrayOf("loadfile", path))
+        }
+    }
+
+    private fun attachSurfaceLocked(surface: Surface) {
+        Log.w(TAG, "attaching surface")
+        isSurfaceAttached = true
+        MPVLib.attachSurface(surface)
+        // This forces mpv to render subs/osd/whatever into our surface even if it would ordinarily not
+        MPVLib.setOptionString("force-window", "yes")
+        MPVLib.setPropertyString("force-window", "yes")
+
+        // We disable video output when the context disappears, enable it back unconditionally before any file load
+        MPVLib.setPropertyString("vo", voInUse)
+
+        if (filePath != null) {
+            val path = filePath as String
+            filePath = null
+            MPVLib.command(arrayOf("loadfile", path))
+        }
+    }
+
+    private fun detachSurfaceInternal() {
+        try {
+            MPVLib.setPropertyString("vo", "null")
+            MPVLib.setPropertyString("force-window", "no")
+
+            // Wait for VO to deinitialize on the mpv core thread before releasing the native window.
+            // In libmpv, getProperty queries synchronously block on the core thread.
+            // vo-configured returns false once VO teardown completes.
+            var attempts = 0
+            while (attempts < 20 && MPVLib.getPropertyBoolean("vo-configured") == true) {
+                try {
+                    Thread.sleep(5)
+                } catch (_: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    break
+                }
+                attempts++
+            }
+            MPVLib.detachSurface()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error detaching surface", e)
+        }
     }
 
     /**
@@ -122,77 +233,157 @@ open class MpvEngine(private val appContext: Context) {
      * Call this once before the view is destroyed.
      */
     fun destroy() {
-        MPVLib.destroy()
+        synchronized(lock) {
+            pendingSurface = null
+            filePath = null
+            pendingSurfaceSize = null
+
+            if (isSurfaceAttached) {
+                isSurfaceAttached = false
+                if (isReady) {
+                    detachSurfaceInternal()
+                }
+            }
+
+            onVideoGeometryChanged = null
+            onPlaybackProgressChanged = null
+
+            if (isReady || _status.value is EngineStatus.Starting) {
+                try {
+                    MPVLib.destroy()
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error destroying MPVLib", e)
+                }
+            }
+            _status.value = EngineStatus.NotStarted
+        }
     }
 
     protected open fun initOptions() {}
     protected open fun postInitOptions() {}
 
-    protected open fun observeProperties() {}
-
-    private var isSurfaceAttached: Boolean = false
-    private var filePath: String? = null
+    protected open fun observeProperties() {
+        MPVLib.observeProperty("media-title", MPVLib.MpvFormat.MPV_FORMAT_STRING)
+    }
 
     /**
-     * Set the file to be played. If the surface is already attached, it loads immediately.
+     * Set the file to be played. If the engine is ready and the surface is attached,
+     * it loads immediately; otherwise it is held as pending until ready and attached.
      */
     fun playFile(filePath: String) {
         clearGeometry()
         clearProgress()
-        if (isSurfaceAttached) {
-            MPVLib.setPropertyString("vo", voInUse)
-            MPVLib.command(arrayOf("loadfile", filePath))
-        } else {
-            this.filePath = filePath
+        synchronized(lock) {
+            if (isReady && isSurfaceAttached) {
+                this.filePath = null
+                MPVLib.setPropertyString("vo", voInUse)
+                MPVLib.command(arrayOf("loadfile", filePath))
+            } else {
+                this.filePath = filePath
+            }
         }
     }
 
-    private var voInUse: String = "gpu"
+    /**
+     * Toggle play/pause state. Guarded by [isReady].
+     */
+    fun togglePause() {
+        synchronized(lock) {
+            if (!isReady) return
+            val paused = MPVLib.getPropertyBoolean("pause") ?: return
+            MPVLib.setPropertyBoolean("pause", !paused)
+        }
+    }
+
+    /**
+     * Seek to an absolute position in seconds. Guarded by [isReady].
+     */
+    fun seekTo(positionSec: Double) {
+        synchronized(lock) {
+            if (!isReady) return
+            MPVLib.command(arrayOf("seek", positionSec.toString(), "absolute"))
+        }
+    }
+
+    /**
+     * Fetch the current track list node from mpv. Guarded by [isReady].
+     */
+    fun getTrackList(): MPVNode? {
+        synchronized(lock) {
+            if (!isReady) return null
+            return MPVLib.getPropertyNode("track-list")
+        }
+    }
+
+    /**
+     * Select audio track by ID. Guarded by [isReady].
+     */
+    fun selectAudioTrack(trackId: Int) {
+        synchronized(lock) {
+            if (!isReady) return
+            MPVLib.setPropertyString("aid", if (trackId <= 0) "no" else trackId.toString())
+        }
+    }
+
+    /**
+     * Select subtitle track by ID, or null to turn subtitles off. Guarded by [isReady].
+     */
+    fun selectSubtitleTrack(trackId: Int?) {
+        synchronized(lock) {
+            if (!isReady) return
+            MPVLib.setPropertyString("sid", if (trackId == null || trackId <= 0) "no" else trackId.toString())
+        }
+    }
 
     /**
      * Sets the VO to use.
      * It is automatically disabled/enabled when the surface dis-/appears.
      */
     fun setVo(vo: String) {
-        voInUse = vo
-        MPVLib.setOptionString("vo", vo)
-        MPVLib.setPropertyString("vo", vo)
+        synchronized(lock) {
+            voInUse = vo
+            if (isReady) {
+                MPVLib.setOptionString("vo", vo)
+                MPVLib.setPropertyString("vo", vo)
+            }
+        }
     }
 
     fun onSurfaceChanged(width: Int, height: Int) {
-        MPVLib.setPropertyString("android-surface-size", "${width}x$height")
+        synchronized(lock) {
+            if (isReady) {
+                MPVLib.setPropertyString("android-surface-size", "${width}x$height")
+            } else {
+                pendingSurfaceSize = Pair(width, height)
+            }
+        }
     }
 
     fun onSurfaceCreated(surface: Surface) {
-        Log.w(TAG, "attaching surface")
-        isSurfaceAttached = true
-        MPVLib.attachSurface(surface)
-        // This forces mpv to render subs/osd/whatever into our surface even if it would ordinarily not
-        MPVLib.setOptionString("force-window", "yes")
-        MPVLib.setPropertyString("force-window", "yes")
-
-        // We disable video output when the context disappears, enable it back unconditionally before any file load
-        MPVLib.setPropertyString("vo", voInUse)
-
-        if (filePath != null) {
-            MPVLib.command(arrayOf("loadfile", filePath as String))
-            filePath = null
+        synchronized(lock) {
+            if (!isReady) {
+                Log.i(TAG, "Surface created before engine is Ready; caching as pending")
+                pendingSurface = surface
+                return
+            }
+            attachSurfaceLocked(surface)
         }
     }
 
     fun onSurfaceDestroyed() {
         Log.w(TAG, "detaching surface")
-        isSurfaceAttached = false
-        MPVLib.setPropertyString("vo", "null")
-        MPVLib.setPropertyString("force-window", "no")
-        // Note that before calling detachSurface() we need to be sure that libmpv
-        // is done using the surface.
-        // FIXME: There could be a race condition here, because I don't think
-        // setting a property will wait for VO deinit.
-        MPVLib.detachSurface()
+        synchronized(lock) {
+            pendingSurface = null
+            if (!isSurfaceAttached) return
+            isSurfaceAttached = false
+            if (isReady) {
+                detachSurfaceInternal()
+            }
+        }
     }
 
     companion object {
         private const val TAG = "mpv"
     }
 }
+

@@ -68,6 +68,10 @@ android {
         buildConfig = true
     }
 
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
+
     // Wire the local MPV AAR from the root libs/ folder
     repositories {
         flatDir { dirs(rootProject.file("libs")) }
@@ -95,4 +99,5 @@ dependencies {
     implementation(libs.androidx.datastore.preferences)
 
     debugImplementation(libs.androidx.ui.tooling)
+    testImplementation("junit:junit:4.13.2")
 }

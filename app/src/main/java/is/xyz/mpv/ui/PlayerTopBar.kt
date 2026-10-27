@@ -2,7 +2,9 @@ package `is`.xyz.mpv.ui
 
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Audiotrack
 import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.Subtitles
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -21,6 +23,9 @@ fun PlayerTopBar(
     title: String?,
     onBackClick: () -> Unit,
     onOpenFileClick: (() -> Unit)? = null,
+    onAudioTrackClick: (() -> Unit)? = null,
+    onSubtitleTrackClick: (() -> Unit)? = null,
+    isEngineReady: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     TopAppBar(
@@ -44,6 +49,30 @@ fun PlayerTopBar(
             }
         },
         actions = {
+            if (onAudioTrackClick != null) {
+                IconButton(
+                    onClick = onAudioTrackClick,
+                    enabled = isEngineReady
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Audiotrack,
+                        contentDescription = "Audio track",
+                        tint = if (isEngineReady) Color.White else Color.Gray
+                    )
+                }
+            }
+            if (onSubtitleTrackClick != null) {
+                IconButton(
+                    onClick = onSubtitleTrackClick,
+                    enabled = isEngineReady
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Subtitles,
+                        contentDescription = "Subtitle track",
+                        tint = if (isEngineReady) Color.White else Color.Gray
+                    )
+                }
+            }
             if (onOpenFileClick != null) {
                 IconButton(onClick = onOpenFileClick) {
                     Icon(
@@ -62,3 +91,4 @@ fun PlayerTopBar(
         )
     )
 }
+
