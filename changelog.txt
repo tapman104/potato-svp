@@ -212,3 +212,15 @@
 - Synchronize system bar visibility with PlayScreen controls auto-hide and tap gestures
 - Maintain immersive state on resume, window focus changes, and configuration changes
 - Add unit tests for track parsing, selection events, and track display name fallbacks
+
+
+28.10.2026
+
+feat(player): delegate playback state to EngineEventHandler and add loading indicator
+
+- Translate mpv pause and media-title property events in EngineEventHandler into TrackState
+- Register EngineEventHandler in MpvEngine and manage observer lifecycles and reset on playFile
+- Decouple PlayerViewModel from direct MPVLib observation by deriving UI state from event flows
+- Support nullable isPlaying state with CircularProgressIndicator in PlayerBottomBar
+- Add unit tests for MpvEngine, EngineEventHandler, and PlayerViewModel with test MPVLib stub
+- Update changelog
