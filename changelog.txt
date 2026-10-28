@@ -198,3 +198,17 @@
   `PlayerBottomBar`, `PlayerSeekBar` — since no separate home-screen file
   has explicit color overrides) was not implemented pending confirmation
   of target file/colors.
+
+
+
+
+  27.10.2026
+  feat: add multitrack selection and immersive mode synced with controls visibility
+
+- Implement EngineEventHandler to parse track-list and observe aid/sid properties
+- Introduce AudioTrackDialog and SubtitleTrackDialog for selecting audio and subtitle streams
+- Add audio and subtitle track action buttons to PlayerTopBar with engine readiness gating
+- Implement modern immersive mode in PlayerActivity using WindowCompat and WindowInsetsControllerCompat with BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+- Synchronize system bar visibility with PlayScreen controls auto-hide and tap gestures
+- Maintain immersive state on resume, window focus changes, and configuration changes
+- Add unit tests for track parsing, selection events, and track display name fallbacks

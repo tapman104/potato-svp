@@ -27,7 +27,10 @@ sealed interface EngineStatus {
     data class Failed(val reason: String) : EngineStatus
 }
 
-open class MpvEngine(private val appContext: Context) {
+open class MpvEngine(
+    private val appContext: Context,
+    private val eventHandler: EngineEventHandler,
+) : MPVLib.EventObserver {
 
     /** Called whenever mpv reports a change to width, height, or rotation. */
     var onVideoGeometryChanged: ((VideoGeometry) -> Unit)? = null
@@ -64,8 +67,13 @@ open class MpvEngine(private val appContext: Context) {
             }
             _status.value = EngineStatus.Starting
 
+            var nativeCreated = false
             try {
+                MPVLib.addObserver(this)
+                MPVLib.addObserver(eventHandler)
+
                 MPVLib.create(appContext.applicationContext)
+                nativeCreated = true
 
                 /* set normal options (user-supplied config can override) */
                 MPVLib.setOptionString("config", "yes")
@@ -95,6 +103,15 @@ open class MpvEngine(private val appContext: Context) {
             } catch (e: Throwable) {
                 val reason = e.message ?: "Unknown initialization error"
                 Log.e(TAG, "libmpv initialization failed: $reason", e)
+                if (nativeCreated) {
+                    try {
+                        MPVLib.destroy()
+                    } catch (destroyEx: Throwable) {
+                        Log.e(TAG, "Error destroying MPVLib after init failure", destroyEx)
+                    }
+                }
+                MPVLib.removeObserver(this)
+                MPVLib.removeObserver(eventHandler)
                 _status.value = EngineStatus.Failed(reason)
                 throw e
             }
@@ -178,10 +195,16 @@ open class MpvEngine(private val appContext: Context) {
         }
     }
 
+    override fun eventProperty(property: String, value: Long) {
+        onPropertyLong(property, value)
+    }
+
+    override fun eventProperty(property: String, value: Double) {
+        onPropertyDouble(property, value)
+    }
+
     /**
-     * Feed a geometry-relevant property update in. Call this from the engine's
-     * EventObserver.eventProperty(property, value: Long) override — see
-     * PlayerViewModel for wiring.
+     * Feed a geometry-relevant property update in.
      *
      * Returns true if the property was consumed (was a geometry property).
      */
@@ -198,9 +221,7 @@ open class MpvEngine(private val appContext: Context) {
     }
 
     /**
-     * Feed a progress-relevant property update in. Call this from the engine's
-     * EventObserver.eventProperty(property, value: Double) override — see
-     * PlayerViewModel for wiring.
+     * Feed a progress-relevant property update in.
      *
      * Returns true if the property was consumed.
      */
@@ -255,6 +276,11 @@ open class MpvEngine(private val appContext: Context) {
                     Log.e(TAG, "Error destroying MPVLib", e)
                 }
             }
+
+            MPVLib.removeObserver(this)
+            MPVLib.removeObserver(eventHandler)
+            eventHandler.reset()
+
             _status.value = EngineStatus.NotStarted
         }
     }
@@ -273,6 +299,7 @@ open class MpvEngine(private val appContext: Context) {
     fun playFile(filePath: String) {
         clearGeometry()
         clearProgress()
+        eventHandler.reset()
         synchronized(lock) {
             if (isReady && isSurfaceAttached) {
                 this.filePath = null

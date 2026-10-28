@@ -24,11 +24,20 @@ data class TrackState(
     val subtitleTracks: List<Track> = emptyList(),
     val selectedAudioId: Int? = null,
     val selectedSubtitleId: Int? = null,
+    val isPaused: Boolean? = null,
+    val mediaTitle: String? = null,
 )
 
 /**
- * Handles raw MPV property-change events for audio and subtitle tracks ("track-list", "aid", "sid")
- * and translates them into typed, observable [TrackState].
+ * Handles raw MPV property-change events for audio and subtitle tracks ("track-list", "aid", "sid"),
+ * as well as playback pause and media-title events ("pause", "media-title"), translating them
+ * into typed, observable [TrackState].
+ *
+ * Precedence note on mediaTitle:
+ * EngineEventHandler acts solely as an event translation layer for MPV native events and does not
+ * track user-chosen filenames or enforce UI display precedence. The precedence rule ("an explicitly-set
+ * filename takes priority over mpv's reported media-title property") is preserved and enforced in
+ * PlayerViewModel when combining UI-provided file names with this state.
  */
 class EngineEventHandler : MPVLib.EventObserver {
 
@@ -41,10 +50,19 @@ class EngineEventHandler : MPVLib.EventObserver {
         }
     }
 
+    override fun eventProperty(property: String, value: Boolean) {
+        if (property == "pause") {
+            _trackState.update { it.copy(isPaused = value) }
+        }
+    }
+
     override fun eventProperty(property: String, value: String) {
         when (property) {
             "aid" -> handleAid(value)
             "sid" -> handleSid(value)
+            "media-title" -> {
+                _trackState.update { it.copy(mediaTitle = value) }
+            }
         }
     }
 
@@ -56,7 +74,7 @@ class EngineEventHandler : MPVLib.EventObserver {
     }
 
     fun reset() {
-        Log.d(TAG, "Resetting track state")
+        Log.d(TAG, "Resetting track and playback state")
         _trackState.value = TrackState()
     }
 

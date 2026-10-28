@@ -228,7 +228,7 @@ fun PlayScreen(
 @Composable
 private fun PlayerBottomBarHost(
     playbackProgressFlow: StateFlow<PlaybackProgress>,
-    isPlaying: Boolean,
+    isPlaying: Boolean?,
     isEnabled: Boolean,
     onPlayPauseClick: () -> Unit,
     onSeek: (Double) -> Unit,

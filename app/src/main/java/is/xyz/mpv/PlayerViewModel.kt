@@ -5,6 +5,7 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -22,7 +23,7 @@ import `is`.xyz.mpv.ui.UriUtils
 // ---------------------------------------------------------------------------
 
 data class PlayerUiState(
-    val isPlaying: Boolean = false,
+    val isPlaying: Boolean? = null,
     val currentFileName: String? = null,
     val engineStatus: EngineStatus = EngineStatus.NotStarted,
     val trackState: TrackState = TrackState(),
@@ -47,38 +48,42 @@ data class OrientationState(
 // ViewModel
 // ---------------------------------------------------------------------------
 
-class PlayerViewModel(private val appContext: Context) : ViewModel(),
-    MPVLib.EventObserver {
+class PlayerViewModel(
+    private val appContext: Context,
+    coroutineScope: CoroutineScope? = null,
+) : ViewModel() {
 
-    // -- engine is public so PlayScreen can hand it to MpvSurfaceView -------
-    val engine: MpvEngine = MpvEngine(appContext)
+    private val scope = coroutineScope ?: viewModelScope
 
     private val eventHandler = EngineEventHandler()
+
+    // -- engine is public so PlayScreen can hand it to MpvSurfaceView -------
+    val engine: MpvEngine = MpvEngine(appContext, eventHandler)
 
     val trackState: StateFlow<TrackState> = eventHandler.trackState
 
     private val preferencesRepository = UserPreferencesRepository(appContext)
 
-    private data class PlaybackUiState(
-        val isPlaying: Boolean = false,
-        val currentFileName: String? = null,
-    )
-
-    private val _playbackUiState = MutableStateFlow(PlaybackUiState())
+    private val _explicitFileName = MutableStateFlow<String?>(null)
 
     val uiState: StateFlow<PlayerUiState> = combine(
-        _playbackUiState,
+        _explicitFileName,
         engine.status,
         eventHandler.trackState,
-    ) { playback, status, tracks ->
+    ) { explicitName, status, tracks ->
+        // Precedence rule: An explicitly-set filename (e.g. from loadFile or loadUri)
+        // takes precedence over mpv's reported media-title property.
+        // mpv's mediaTitle is used as a fallback when explicitName is null or blank.
+        val resolvedFileName = if (!explicitName.isNullOrBlank()) explicitName else tracks.mediaTitle
+
         PlayerUiState(
-            isPlaying = playback.isPlaying,
-            currentFileName = playback.currentFileName,
+            isPlaying = tracks.isPaused?.let { !it },
+            currentFileName = resolvedFileName,
             engineStatus = status,
             trackState = tracks,
         )
     }.stateIn(
-        scope = viewModelScope,
+        scope = scope,
         started = SharingStarted.Eagerly,
         initialValue = PlayerUiState(),
     )
@@ -110,13 +115,12 @@ class PlayerViewModel(private val appContext: Context) : ViewModel(),
             videoRotationDegrees = geometry.rotationDegrees,
         )
     }.stateIn(
-        scope = viewModelScope,
+        scope = scope,
         started = SharingStarted.WhileSubscribed(5000),
         initialValue = OrientationState(),
     )
 
     init {
-        MPVLib.addObserver(this)
         MPVLib.addLogObserver(logObserver)
         engine.onVideoGeometryChanged = { geometry ->
             Log.i(TAG, "Geometry changed: ${geometry.width}x${geometry.height}, rot=${geometry.rotationDegrees}")
@@ -129,7 +133,7 @@ class PlayerViewModel(private val appContext: Context) : ViewModel(),
     }
 
     private fun initEngine() {
-        viewModelScope.launch {
+        scope.launch {
             try {
                 engine.initialize(
                     configDir = appContext.filesDir.path,
@@ -151,9 +155,8 @@ class PlayerViewModel(private val appContext: Context) : ViewModel(),
     fun loadFile(path: String, displayName: String? = null) {
         val name = displayName ?: UriUtils.getDisplayNameFromPath(path)
         Log.i(TAG, "loadFile: path=$path, name=$name")
-        _playbackUiState.update { it.copy(currentFileName = name) }
+        _explicitFileName.value = name
         _playbackProgress.value = PlaybackProgress()
-        eventHandler.reset()
         engine.playFile(path)
     }
 
@@ -175,47 +178,15 @@ class PlayerViewModel(private val appContext: Context) : ViewModel(),
     }
 
     fun setOrientationMode(mode: OrientationMode) {
-        viewModelScope.launch {
+        scope.launch {
             preferencesRepository.setOrientationMode(mode)
         }
     }
-
-    // -- MPVLib.EventObserver ------------------------------------------------
-
-    override fun eventProperty(property: String) {}
-
-    override fun eventProperty(property: String, value: Long) {
-        engine.onPropertyLong(property, value)
-    }
-
-    override fun eventProperty(property: String, value: Boolean) {
-        if (property == "pause") {
-            _playbackUiState.update { it.copy(isPlaying = !value) }
-        }
-    }
-
-    override fun eventProperty(property: String, value: String) {
-        eventHandler.eventProperty(property, value)
-        if (property == "media-title" && _playbackUiState.value.currentFileName.isNullOrBlank()) {
-            _playbackUiState.update { it.copy(currentFileName = value) }
-        }
-    }
-
-    override fun eventProperty(property: String, value: MPVNode) {
-        eventHandler.eventProperty(property, value)
-    }
-
-    override fun eventProperty(property: String, value: Double) {
-        engine.onPropertyDouble(property, value)
-    }
-
-    override fun event(eventId: Int) {}
 
     // -- Lifecycle -----------------------------------------------------------
 
     override fun onCleared() {
         super.onCleared()
-        MPVLib.removeObserver(this)
         MPVLib.removeLogObserver(logObserver)
         engine.destroy()
     }

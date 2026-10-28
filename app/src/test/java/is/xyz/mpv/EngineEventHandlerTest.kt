@@ -1,5 +1,7 @@
 package `is`.xyz.mpv
 
+import android.content.Context
+import android.content.ContextWrapper
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -120,6 +122,66 @@ class EngineEventHandlerTest {
         assertEquals(5, state4.selectedSubtitleId)
         assertFalse(state4.subtitleTracks[0].isSelected)
         assertTrue(state4.subtitleTracks[1].isSelected)
+    }
+
+    @Test
+    fun testPauseAndMediaTitleEventsUpdateHandlerState() {
+        val handler = EngineEventHandler()
+
+        // Initially null before any events arrive
+        assertNull(handler.trackState.value.isPaused)
+        assertNull(handler.trackState.value.mediaTitle)
+
+        // 1. Pause event: true
+        handler.eventProperty("pause", true)
+        assertEquals(true, handler.trackState.value.isPaused)
+
+        // 2. Pause event: false (playing)
+        handler.eventProperty("pause", false)
+        assertEquals(false, handler.trackState.value.isPaused)
+
+        // 3. Media-title event
+        handler.eventProperty("media-title", "Big Buck Bunny 1080p")
+        assertEquals("Big Buck Bunny 1080p", handler.trackState.value.mediaTitle)
+
+        // 4. Reset clears isPaused and mediaTitle
+        handler.reset()
+        assertNull(handler.trackState.value.isPaused)
+        assertNull(handler.trackState.value.mediaTitle)
+        assertTrue(handler.trackState.value.audioTracks.isEmpty())
+        assertTrue(handler.trackState.value.subtitleTracks.isEmpty())
+    }
+
+    @Test
+    fun testPlayFileResetsTrackState() {
+        val eventHandler = EngineEventHandler()
+        val context = object : ContextWrapper(null) {
+            override fun getApplicationContext(): Context = this
+        }
+        val engine = MpvEngine(context, eventHandler)
+
+        // Set non-default track and pause state
+        eventHandler.eventProperty("aid", "2")
+        eventHandler.eventProperty("sid", "5")
+        eventHandler.eventProperty("media-title", "Old File Movie")
+        eventHandler.eventProperty("pause", true)
+
+        val beforeState = eventHandler.trackState.value
+        assertEquals(2, beforeState.selectedAudioId)
+        assertEquals(5, beforeState.selectedSubtitleId)
+        assertEquals("Old File Movie", beforeState.mediaTitle)
+        assertEquals(true, beforeState.isPaused)
+
+        // Calling playFile on engine must reset eventHandler trackState to defaults
+        engine.playFile("/path/to/new_video.mp4")
+
+        val afterState = eventHandler.trackState.value
+        assertTrue(afterState.audioTracks.isEmpty())
+        assertTrue(afterState.subtitleTracks.isEmpty())
+        assertNull(afterState.selectedAudioId)
+        assertNull(afterState.selectedSubtitleId)
+        assertNull(afterState.mediaTitle)
+        assertNull(afterState.isPaused)
     }
 
     @Test

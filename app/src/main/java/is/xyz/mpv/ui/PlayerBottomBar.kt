@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Surface
@@ -21,7 +22,7 @@ import androidx.compose.ui.unit.dp
 
 @Composable
 fun PlayerBottomBar(
-    isPlaying: Boolean,
+    isPlaying: Boolean?,
     isEnabled: Boolean,
     positionSec: Double,
     durationSec: Double,
@@ -57,14 +58,27 @@ fun PlayerBottomBar(
             ) {
                 IconButton(
                     onClick = onPlayPauseClick,
-                    enabled = isEnabled,
+                    enabled = isEnabled && isPlaying != null,
                 ) {
-                    Icon(
-                        imageVector = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                        contentDescription = if (isPlaying) "Pause" else "Play",
-                        tint = if (isEnabled) Color.White else Color.Gray,
-                        modifier = Modifier.size(36.dp)
-                    )
+                    when (isPlaying) {
+                        true -> Icon(
+                            imageVector = Icons.Filled.Pause,
+                            contentDescription = "Pause",
+                            tint = if (isEnabled) Color.White else Color.Gray,
+                            modifier = Modifier.size(36.dp)
+                        )
+                        false -> Icon(
+                            imageVector = Icons.Filled.PlayArrow,
+                            contentDescription = "Play",
+                            tint = if (isEnabled) Color.White else Color.Gray,
+                            modifier = Modifier.size(36.dp)
+                        )
+                        null -> CircularProgressIndicator(
+                            modifier = Modifier.size(28.dp),
+                            color = if (isEnabled) Color.White else Color.Gray,
+                            strokeWidth = 2.5.dp
+                        )
+                    }
                 }
             }
         }
