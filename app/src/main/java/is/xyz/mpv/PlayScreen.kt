@@ -10,6 +10,15 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -23,6 +32,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import `is`.xyz.mpv.ui.AudioTrackDialog
 import `is`.xyz.mpv.ui.PlayerBottomBar
@@ -121,6 +131,55 @@ fun PlayScreen(
                 }
         )
 
+        // Overlay: Center play/pause button
+        Box(
+            modifier = Modifier.align(Alignment.Center)
+        ) {
+            AnimatedVisibility(
+                visible = controlsVisible,
+                enter = fadeIn(),
+                exit = fadeOut()
+            ) {
+                IconButton(
+                    onClick = {
+                        resetHideTimer()
+                        viewModel.togglePlayPause()
+                    },
+                    enabled = uiState.isEngineReady && uiState.isPlaying != null
+                ) {
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier
+                            .background(
+                                color = Color.Black.copy(alpha = 0.4f),
+                                shape = CircleShape
+                            )
+                            .padding(12.dp)
+                    ) {
+                        when (uiState.isPlaying) {
+                            true -> Icon(
+                                imageVector = Icons.Filled.Pause,
+                                contentDescription = "Pause",
+                                tint = Color.White,
+                                modifier = Modifier.size(40.dp)
+                            )
+                            false -> Icon(
+                                imageVector = Icons.Filled.PlayArrow,
+                                contentDescription = "Play",
+                                tint = Color.White,
+                                modifier = Modifier.size(40.dp)
+                            )
+                            null -> CircularProgressIndicator(
+                                modifier = Modifier.size(36.dp),
+                                color = Color.White,
+                                strokeWidth = 2.5.dp
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
         // Overlay: Top app bar with back navigation and title
         AnimatedVisibility(
             visible = controlsVisible,
@@ -155,7 +214,7 @@ fun PlayScreen(
             )
         }
 
-        // Overlay: Bottom app bar with play/pause toggle and seek bar
+        // Overlay: Bottom app bar with seek bar
         AnimatedVisibility(
             visible = controlsVisible,
             enter = fadeIn(),
@@ -166,12 +225,7 @@ fun PlayScreen(
         ) {
             PlayerBottomBarHost(
                 playbackProgressFlow = viewModel.playbackProgress,
-                isPlaying = uiState.isPlaying,
                 isEnabled = uiState.isEngineReady,
-                onPlayPauseClick = {
-                    resetHideTimer()
-                    viewModel.togglePlayPause()
-                },
                 onSeek = { pos ->
                     resetHideTimer()
                     viewModel.seekTo(pos)
@@ -228,20 +282,16 @@ fun PlayScreen(
 @Composable
 private fun PlayerBottomBarHost(
     playbackProgressFlow: StateFlow<PlaybackProgress>,
-    isPlaying: Boolean?,
     isEnabled: Boolean,
-    onPlayPauseClick: () -> Unit,
     onSeek: (Double) -> Unit,
     onSeekStarted: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val progress by playbackProgressFlow.collectAsState()
     PlayerBottomBar(
-        isPlaying = isPlaying,
         isEnabled = isEnabled,
         positionSec = progress.positionSec,
         durationSec = progress.durationSec,
-        onPlayPauseClick = onPlayPauseClick,
         onSeek = onSeek,
         onSeekStarted = onSeekStarted,
         modifier = modifier
