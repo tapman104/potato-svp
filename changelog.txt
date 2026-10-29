@@ -224,3 +224,20 @@ feat(player): delegate playback state to EngineEventHandler and add loading indi
 - Support nullable isPlaying state with CircularProgressIndicator in PlayerBottomBar
 - Add unit tests for MpvEngine, EngineEventHandler, and PlayerViewModel with test MPVLib stub
 - Update changelog
+
+
+29.10.2026
+
+fix(player): re-arm pause observer on file load to prevent stuck spinner 
+
+commit 698d9d64f9856d39e05fe81e917551375caff6ba
+
+Date:   Thu Oct 29 22:53:06 2026 +0530
+
+    feat(subtitles): add subtitle font size and position appearance settings
+    
+    - Add setSubFontSize and setSubPos property setters to MpvEngine
+    - Persist subtitle font size and position in UserPreferencesRepository
+    - Expose state flows and preview/commit actions in PlayerViewModel
+    - Add appearance view with font size and position sliders in SubtitleTrackDialog
+    - Wire appearance controls and state in PlayScreen
