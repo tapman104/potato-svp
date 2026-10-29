@@ -62,6 +62,8 @@ fun PlayScreen(
     )
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val subFontSize by viewModel.subFontSize.collectAsState()
+    val subPos by viewModel.subPos.collectAsState()
     val context = LocalContext.current
     val backDispatcher = LocalOnBackPressedDispatcherOwner.current?.onBackPressedDispatcher
 
@@ -154,25 +156,25 @@ fun PlayScreen(
                                 color = Color.Black.copy(alpha = 0.4f),
                                 shape = CircleShape
                             )
-                            .padding(12.dp)
+                            .padding(14.dp)
                     ) {
                         when (uiState.isPlaying) {
                             true -> Icon(
                                 imageVector = Icons.Filled.Pause,
                                 contentDescription = "Pause",
                                 tint = Color.White,
-                                modifier = Modifier.size(40.dp)
+                                modifier = Modifier.size(52.dp)
                             )
                             false -> Icon(
                                 imageVector = Icons.Filled.PlayArrow,
                                 contentDescription = "Play",
                                 tint = Color.White,
-                                modifier = Modifier.size(40.dp)
+                                modifier = Modifier.size(52.dp)
                             )
                             null -> CircularProgressIndicator(
-                                modifier = Modifier.size(36.dp),
+                                modifier = Modifier.size(48.dp),
                                 color = Color.White,
-                                strokeWidth = 2.5.dp
+                                strokeWidth = 3.dp
                             )
                         }
                     }
@@ -266,7 +268,13 @@ fun PlayScreen(
                     onDismissRequest = {
                         activeDialog = TrackDialogType.NONE
                         resetHideTimer()
-                    }
+                    },
+                    subFontSize = subFontSize,
+                    subPos = subPos,
+                    onFontSizeChange = { viewModel.previewSubFontSize(it) },
+                    onFontSizeCommit = { viewModel.commitSubFontSize(it) },
+                    onPosChange = { viewModel.previewSubPos(it) },
+                    onPosCommit = { viewModel.commitSubPos(it) },
                 )
             }
             TrackDialogType.NONE -> Unit

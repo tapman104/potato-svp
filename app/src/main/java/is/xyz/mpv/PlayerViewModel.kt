@@ -120,6 +120,11 @@ class PlayerViewModel(
         initialValue = OrientationState(),
     )
 
+    val subFontSize: StateFlow<Int> = preferencesRepository.subFontSize
+        .stateIn(scope, SharingStarted.WhileSubscribed(5000), 55)
+    val subPos: StateFlow<Int> = preferencesRepository.subPos
+        .stateIn(scope, SharingStarted.WhileSubscribed(5000), 100)
+
     init {
         MPVLib.addLogObserver(logObserver)
         engine.onVideoGeometryChanged = { geometry ->
@@ -128,6 +133,14 @@ class PlayerViewModel(
         }
         engine.onPlaybackProgressChanged = { pos, dur ->
             _playbackProgress.update { PlaybackProgress(positionSec = pos, durationSec = dur) }
+        }
+        scope.launch {
+            engine.status.collect { status ->
+                if (status is EngineStatus.Ready) {
+                    engine.setSubFontSize(subFontSize.value)
+                    engine.setSubPos(subPos.value)
+                }
+            }
         }
         initEngine()
     }
@@ -175,6 +188,26 @@ class PlayerViewModel(
 
     fun selectSubtitleTrack(id: Int?) {
         engine.selectSubtitleTrack(id)
+    }
+
+    fun previewSubFontSize(size: Int) {
+        engine.setSubFontSize(size)
+    }
+
+    fun commitSubFontSize(size: Int) {
+        scope.launch {
+            preferencesRepository.setSubFontSize(size)
+        }
+    }
+
+    fun previewSubPos(pos: Int) {
+        engine.setSubPos(pos)
+    }
+
+    fun commitSubPos(pos: Int) {
+        scope.launch {
+            preferencesRepository.setSubPos(pos)
+        }
     }
 
     fun setOrientationMode(mode: OrientationMode) {

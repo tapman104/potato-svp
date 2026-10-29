@@ -367,6 +367,20 @@ open class MpvEngine(
         }
     }
 
+    fun setSubFontSize(size: Int) {
+        synchronized(lock) {
+            if (!isReady) return
+            MPVLib.setPropertyString("sub-font-size", size.toString())
+        }
+    }
+
+    fun setSubPos(pos: Int) {
+        synchronized(lock) {
+            if (!isReady) return
+            MPVLib.setPropertyString("sub-pos", pos.toString())
+        }
+    }
+
     /**
      * Sets the VO to use.
      * It is automatically disabled/enabled when the surface dis-/appears.
