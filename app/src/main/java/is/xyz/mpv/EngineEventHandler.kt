@@ -52,6 +52,7 @@ class EngineEventHandler : MPVLib.EventObserver {
 
     override fun eventProperty(property: String, value: Boolean) {
         if (property == "pause") {
+            Log.d(TAG, "Playback pause state updated from mpv: isPaused=$value")
             _trackState.update { it.copy(isPaused = value) }
         }
     }

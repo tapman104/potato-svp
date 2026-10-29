@@ -149,7 +149,7 @@ open class MpvEngine(
         } else if (isSurfaceAttached && filePath != null) {
             val path = filePath as String
             filePath = null
-            MPVLib.command(arrayOf("loadfile", path))
+            loadFileLocked(path)
         }
     }
 
@@ -167,8 +167,13 @@ open class MpvEngine(
         if (filePath != null) {
             val path = filePath as String
             filePath = null
-            MPVLib.command(arrayOf("loadfile", path))
+            loadFileLocked(path)
         }
+    }
+
+    private fun loadFileLocked(path: String) {
+        MPVLib.command(arrayOf("loadfile", path))
+        MPVLib.observeProperty("pause", MPVLib.MpvFormat.MPV_FORMAT_FLAG)
     }
 
     private fun detachSurfaceInternal() {
@@ -304,7 +309,7 @@ open class MpvEngine(
             if (isReady && isSurfaceAttached) {
                 this.filePath = null
                 MPVLib.setPropertyString("vo", voInUse)
-                MPVLib.command(arrayOf("loadfile", filePath))
+                loadFileLocked(filePath)
             } else {
                 this.filePath = filePath
             }

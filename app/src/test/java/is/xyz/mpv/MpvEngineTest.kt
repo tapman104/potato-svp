@@ -195,4 +195,25 @@ class MpvEngineTest {
             declaredMethodNames.contains("event")
         )
     }
+
+    @Test
+    fun testPlayFileRearmsPauseObserver() {
+        val eventHandler = EngineEventHandler()
+        val context = createTestContext()
+        val engine = MpvEngine(context, eventHandler)
+
+        engine.initialize(configDir = "/tmp/config", cacheDir = "/tmp/cache")
+        MPVLib.observedProperties.clear()
+
+        // Attach surface so engine is ready to load file immediately
+        val surface = android.view.Surface(android.graphics.SurfaceTexture(0))
+        engine.onSurfaceCreated(surface)
+
+        engine.playFile("/path/to/video.mp4")
+
+        assertTrue(
+            "observeProperty(\"pause\", MPV_FORMAT_FLAG) must be re-armed when loading a file",
+            MPVLib.observedProperties.any { it.first == "pause" && it.second == MPVLib.MpvFormat.MPV_FORMAT_FLAG }
+        )
+    }
 }

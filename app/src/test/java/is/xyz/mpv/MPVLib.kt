@@ -53,7 +53,13 @@ object MPVLib {
     fun getPropertyNode(property: String): MPVNode? = null
     fun setPropertyNode(property: String, node: MPVNode) {}
 
-    fun observeProperty(property: String, format: Int) {}
+    val observedProperties = mutableListOf<Pair<String, Int>>()
+
+    fun observeProperty(property: String, format: Int) {
+        synchronized(observedProperties) {
+            observedProperties.add(property to format)
+        }
+    }
 
     private val observers = mutableListOf<EventObserver>()
 
@@ -63,6 +69,9 @@ object MPVLib {
     fun clearObservers() {
         synchronized(observers) {
             observers.clear()
+        }
+        synchronized(observedProperties) {
+            observedProperties.clear()
         }
         simulateInitFailure = false
         simulatePostCreateFailure = false
