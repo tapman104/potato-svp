@@ -60,68 +60,68 @@ object MPVLib {
         }
     }
 
+    // FIX #4: Snapshot observers before iterating to avoid holding lock over callbacks
     @JvmStatic
     fun eventProperty(property: String, value: Long) {
-        synchronized(observers) {
-            for (o in observers)
-                o.eventProperty(property, value)
-        }
+        val snapshot = synchronized(observers) { observers.toList() }
+        for (o in snapshot)
+            o.eventProperty(property, value)
     }
 
+    // FIX #4: Snapshot observers before iterating to avoid holding lock over callbacks
     @JvmStatic
     fun eventProperty(property: String, value: Boolean) {
-        synchronized(observers) {
-            for (o in observers)
-                o.eventProperty(property, value)
-        }
+        val snapshot = synchronized(observers) { observers.toList() }
+        for (o in snapshot)
+            o.eventProperty(property, value)
     }
 
+    // FIX #4: Snapshot observers before iterating to avoid holding lock over callbacks
     @JvmStatic
     fun eventProperty(property: String, value: Double) {
-        synchronized(observers) {
-            for (o in observers)
-                o.eventProperty(property, value)
-        }
+        val snapshot = synchronized(observers) { observers.toList() }
+        for (o in snapshot)
+            o.eventProperty(property, value)
     }
 
+    // FIX #4: Snapshot observers before iterating to avoid holding lock over callbacks
     @JvmStatic
     fun eventProperty(property: String, value: String) {
-        synchronized(observers) {
-            for (o in observers)
-                o.eventProperty(property, value)
-        }
+        val snapshot = synchronized(observers) { observers.toList() }
+        for (o in snapshot)
+            o.eventProperty(property, value)
     }
 
+    // FIX #4: Snapshot observers before iterating to avoid holding lock over callbacks
     @JvmStatic
     fun eventProperty(property: String, value: MPVNode) {
-        synchronized(observers) {
-            for (o in observers)
-                o.eventProperty(property, value)
-        }
+        val snapshot = synchronized(observers) { observers.toList() }
+        for (o in snapshot)
+            o.eventProperty(property, value)
     }
 
+    // FIX #4: Snapshot observers before iterating to avoid holding lock over callbacks
     @JvmStatic
     fun eventProperty(property: String) {
-        synchronized(observers) {
-            for (o in observers)
-                o.eventProperty(property)
-        }
+        val snapshot = synchronized(observers) { observers.toList() }
+        for (o in snapshot)
+            o.eventProperty(property)
     }
 
+    // FIX #4: Snapshot observers before iterating to avoid holding lock over callbacks
     @JvmStatic
     fun event(eventId: Int, data: MPVNode) {
-        synchronized(observers) {
-            for (o in observers)
-                o.event(eventId, data)
-        }
+        val snapshot = synchronized(observers) { observers.toList() }
+        for (o in snapshot)
+            o.event(eventId, data)
     }
 
+    // FIX #4: Snapshot observers before iterating to avoid holding lock over callbacks
     @JvmStatic
     fun event(eventId: Int) {
-        synchronized(observers) {
-            for (o in observers)
-                o.event(eventId)
-        }
+        val snapshot = synchronized(observers) { observers.toList() }
+        for (o in snapshot)
+            o.event(eventId)
     }
 
     private val log_observers = mutableListOf<LogObserver>()
@@ -140,12 +140,12 @@ object MPVLib {
         }
     }
 
+    // FIX #4: Snapshot log_observers before iterating to avoid holding lock over callbacks
     @JvmStatic
     fun logMessage(prefix: String, level: Int, text: String) {
-        synchronized(log_observers) {
-            for (o in log_observers)
-                o.logMessage(prefix, level, text)
-        }
+        val snapshot = synchronized(log_observers) { log_observers.toList() }
+        for (o in snapshot)
+            o.logMessage(prefix, level, text)
     }
 
     interface EventObserver {

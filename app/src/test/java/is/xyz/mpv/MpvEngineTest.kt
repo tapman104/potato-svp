@@ -216,4 +216,31 @@ class MpvEngineTest {
             MPVLib.observedProperties.any { it.first == "pause" && it.second == MPVLib.MpvFormat.MPV_FORMAT_FLAG }
         )
     }
+
+    // FIX CHECK-A: Test process-wide ownership guard prevents concurrent initialization
+    @Test
+    fun testProcessWideOwnershipGuardThrowsOnConcurrentCreate() {
+        val eventHandler1 = EngineEventHandler()
+        val context1 = createTestContext()
+        val engine1 = MpvEngine(context1, eventHandler1)
+        engine1.initialize(configDir = "/tmp/config", cacheDir = "/tmp/cache")
+
+        val eventHandler2 = EngineEventHandler()
+        val context2 = createTestContext()
+        val engine2 = MpvEngine(context2, eventHandler2)
+
+        try {
+            engine2.initialize(configDir = "/tmp/config", cacheDir = "/tmp/cache")
+            fail("Expected second MpvEngine.initialize to throw IllegalStateException due to MpvLifecycleGuard")
+        } catch (e: IllegalStateException) {
+            assertEquals("MPVLib is already owned", e.message)
+        } finally {
+            engine1.destroy()
+        }
+
+        // After engine1 destroys, engine2 should be able to initialize cleanly
+        engine2.initialize(configDir = "/tmp/config", cacheDir = "/tmp/cache")
+        assertEquals(EngineStatus.Ready, engine2.status.value)
+        engine2.destroy()
+    }
 }

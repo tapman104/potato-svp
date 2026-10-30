@@ -1,6 +1,7 @@
 package `is`.xyz.mpv
 
 import android.util.Log
+import com.potato.player.BuildConfig
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -84,12 +85,15 @@ class EngineEventHandler : MPVLib.EventObserver {
         val audio = rawTracks.filter { it.type == TrackType.Audio }
         val subs = rawTracks.filter { it.type == TrackType.Subtitle }
 
-        Log.i(TAG, "Parsed ${audio.size} audio tracks, ${subs.size} subtitle tracks from track-list node")
-        for (track in audio) {
-            Log.i(TAG, "  Audio track: id=${track.id}, lang=${track.lang}, title=${track.title}, selected=${track.isSelected}")
-        }
-        for (track in subs) {
-            Log.i(TAG, "  Subtitle track: id=${track.id}, lang=${track.lang}, title=${track.title}, selected=${track.isSelected}")
+        // FIX #6: Gate per-track Log.i loop behind BuildConfig.DEBUG
+        if (BuildConfig.DEBUG) {
+            Log.i(TAG, "Parsed ${audio.size} audio tracks, ${subs.size} subtitle tracks from track-list node")
+            for (track in audio) {
+                Log.i(TAG, "  Audio track: id=${track.id}, lang=${track.lang}, title=${track.title}, selected=${track.isSelected}")
+            }
+            for (track in subs) {
+                Log.i(TAG, "  Subtitle track: id=${track.id}, lang=${track.lang}, title=${track.title}, selected=${track.isSelected}")
+            }
         }
 
         _trackState.update { current ->

@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.launch
 
 import android.net.Uri
+import com.potato.player.BuildConfig
 import `is`.xyz.mpv.ui.UriUtils
 
 // ---------------------------------------------------------------------------
@@ -27,6 +28,8 @@ data class PlayerUiState(
     val currentFileName: String? = null,
     val engineStatus: EngineStatus = EngineStatus.NotStarted,
     val trackState: TrackState = TrackState(),
+    // FIX #5: Expose isLoadingNewFile in PlayerUiState
+    val isLoadingNewFile: Boolean = false,
 ) {
     val isEngineReady: Boolean get() = engineStatus is EngineStatus.Ready
 }
@@ -66,11 +69,16 @@ class PlayerViewModel(
 
     private val _explicitFileName = MutableStateFlow<String?>(null)
 
+    // FIX #5: Expose explicit isLoadingNewFile signal
+    private val _isLoadingNewFile = MutableStateFlow(false)
+    val isLoadingNewFile: StateFlow<Boolean> = _isLoadingNewFile.asStateFlow()
+
     val uiState: StateFlow<PlayerUiState> = combine(
         _explicitFileName,
         engine.status,
         eventHandler.trackState,
-    ) { explicitName, status, tracks ->
+        _isLoadingNewFile,
+    ) { explicitName, status, tracks, loadingNewFile ->
         // Precedence rule: An explicitly-set filename (e.g. from loadFile or loadUri)
         // takes precedence over mpv's reported media-title property.
         // mpv's mediaTitle is used as a fallback when explicitName is null or blank.
@@ -81,6 +89,7 @@ class PlayerViewModel(
             currentFileName = resolvedFileName,
             engineStatus = status,
             trackState = tracks,
+            isLoadingNewFile = loadingNewFile,
         )
     }.stateIn(
         scope = scope,
@@ -88,9 +97,12 @@ class PlayerViewModel(
         initialValue = PlayerUiState(),
     )
 
+    // FIX #6: Gate logObserver.logMessage behind BuildConfig.DEBUG
     private val logObserver = object : MPVLib.LogObserver {
         override fun logMessage(prefix: String, level: Int, text: String) {
-            Log.i("mpv-native", "[$prefix] $text".trimEnd())
+            if (BuildConfig.DEBUG) {
+                Log.i("mpv-native", "[$prefix] $text".trimEnd())
+            }
         }
     }
 
@@ -134,11 +146,28 @@ class PlayerViewModel(
         engine.onPlaybackProgressChanged = { pos, dur ->
             _playbackProgress.update { PlaybackProgress(positionSec = pos, durationSec = dur) }
         }
+        // FIX #3: Combine engine.status with committed subtitle preferences to re-apply on preference emission when Ready
         scope.launch {
-            engine.status.collect { status ->
+            combine(
+                engine.status,
+                subFontSize,
+                subPos,
+            ) { status, fontSize, pos ->
+                Triple(status, fontSize, pos)
+            }.collect { (status, fontSize, pos) ->
                 if (status is EngineStatus.Ready) {
-                    engine.setSubFontSize(subFontSize.value)
-                    engine.setSubPos(subPos.value)
+                    engine.setSubFontSize(fontSize)
+                    engine.setSubPos(pos)
+                }
+            }
+        }
+        // FIX #5: Clear isLoadingNewFile when first post-load pause or track-list event arrives
+        scope.launch {
+            eventHandler.trackState.collect { tracks ->
+                if (_isLoadingNewFile.value) {
+                    if (tracks.isPaused != null || tracks.audioTracks.isNotEmpty() || tracks.subtitleTracks.isNotEmpty()) {
+                        _isLoadingNewFile.value = false
+                    }
                 }
             }
         }
@@ -159,17 +188,30 @@ class PlayerViewModel(
         }
     }
 
+    // FIX #7: Handle failure in UriUtils resolution without updating state or calling engine
     fun loadUri(uri: Uri) {
-        val displayName = UriUtils.getDisplayName(appContext, uri)
-        val playablePath = UriUtils.resolvePlayablePath(appContext, uri)
-        loadFile(playablePath, displayName)
+        try {
+            val displayName = UriUtils.getDisplayName(appContext, uri)
+            val playablePath = UriUtils.resolvePlayablePath(appContext, uri)
+            loadFile(playablePath, displayName)
+        } catch (e: Throwable) {
+            Log.e(TAG, "Failed to resolve uri: $uri", e)
+        }
     }
 
+    // FIX #7: Handle failure in UriUtils resolution without updating state or calling engine
     fun loadFile(path: String, displayName: String? = null) {
-        val name = displayName ?: UriUtils.getDisplayNameFromPath(path)
+        val name = try {
+            displayName ?: UriUtils.getDisplayNameFromPath(path)
+        } catch (e: Throwable) {
+            Log.e(TAG, "Failed to resolve display name for path: $path", e)
+            return
+        }
         Log.i(TAG, "loadFile: path=$path, name=$name")
         _explicitFileName.value = name
         _playbackProgress.value = PlaybackProgress()
+        // FIX #5: Set isLoadingNewFile true before calling engine.playFile
+        _isLoadingNewFile.value = true
         engine.playFile(path)
     }
 

@@ -72,7 +72,8 @@ open class MpvEngine(
                 MPVLib.addObserver(this)
                 MPVLib.addObserver(eventHandler)
 
-                MPVLib.create(appContext.applicationContext)
+                // FIX CHECK-A: Route create through MpvLifecycleGuard
+                MpvLifecycleGuard.create(this, appContext.applicationContext)
                 nativeCreated = true
 
                 /* set normal options (user-supplied config can override) */
@@ -105,7 +106,8 @@ open class MpvEngine(
                 Log.e(TAG, "libmpv initialization failed: $reason", e)
                 if (nativeCreated) {
                     try {
-                        MPVLib.destroy()
+                        // FIX CHECK-A: Route destroy through MpvLifecycleGuard
+                        MpvLifecycleGuard.destroy(this)
                     } catch (destroyEx: Throwable) {
                         Log.e(TAG, "Error destroying MPVLib after init failure", destroyEx)
                     }
@@ -213,14 +215,18 @@ open class MpvEngine(
      *
      * Returns true if the property was consumed (was a geometry property).
      */
+    // FIX #2: synchronized geometry mutation with callback outside lock
     fun onPropertyLong(property: String, value: Long): Boolean {
-        val updated = when (property) {
-            "width" -> currentGeometry.copy(width = value.toInt())
-            "height" -> currentGeometry.copy(height = value.toInt())
-            "video-rotate" -> currentGeometry.copy(rotationDegrees = value.toInt())
-            else -> return false
+        val updated = synchronized(lock) {
+            val next = when (property) {
+                "width" -> currentGeometry.copy(width = value.toInt())
+                "height" -> currentGeometry.copy(height = value.toInt())
+                "video-rotate" -> currentGeometry.copy(rotationDegrees = value.toInt())
+                else -> return false
+            }
+            currentGeometry = next
+            next
         }
-        currentGeometry = updated
         onVideoGeometryChanged?.invoke(updated)
         return true
     }
@@ -230,13 +236,17 @@ open class MpvEngine(
      *
      * Returns true if the property was consumed.
      */
+    // FIX #2: synchronized progress mutation with callback outside lock
     fun onPropertyDouble(property: String, value: Double): Boolean {
-        when (property) {
-            "time-pos" -> currentPositionSec = value
-            "duration" -> currentDurationSec = value
-            else -> return false
+        val (pos, dur) = synchronized(lock) {
+            when (property) {
+                "time-pos" -> currentPositionSec = value
+                "duration" -> currentDurationSec = value
+                else -> return false
+            }
+            Pair(currentPositionSec, currentDurationSec)
         }
-        onPlaybackProgressChanged?.invoke(currentPositionSec, currentDurationSec)
+        onPlaybackProgressChanged?.invoke(pos, dur)
         return true
     }
 
@@ -276,7 +286,8 @@ open class MpvEngine(
 
             if (isReady || _status.value is EngineStatus.Starting) {
                 try {
-                    MPVLib.destroy()
+                    // FIX CHECK-A: Route destroy through MpvLifecycleGuard
+                    MpvLifecycleGuard.destroy(this)
                 } catch (e: Exception) {
                     Log.e(TAG, "Error destroying MPVLib", e)
                 }
@@ -311,6 +322,10 @@ open class MpvEngine(
                 MPVLib.setPropertyString("vo", voInUse)
                 loadFileLocked(filePath)
             } else {
+                // FIX #7: Warn when overwriting a non-null pending filePath before it was loaded
+                if (this.filePath != null) {
+                    Log.w(TAG, "Pending file '${this.filePath}' discarded before load; overwriting with '$filePath'")
+                }
                 this.filePath = filePath
             }
         }
