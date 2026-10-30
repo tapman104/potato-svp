@@ -241,3 +241,15 @@ Date:   Thu Oct 29 22:53:06 2026 +0530
     - Expose state flows and preview/commit actions in PlayerViewModel
     - Add appearance view with font size and position sliders in SubtitleTrackDialog
     - Wire appearance controls and state in PlayScreen
+
+
+
+30.10.2026
+
+fix(lifecycle): implement identity-tracked MpvLifecycleGuard and harden observer dispatch
+
+Add MpvLifecycleGuard with synchronized identity-tracked ownership to prevent concurrent MPVLib access
+Route native create and destroy in MpvEngine through MpvLifecycleGuard with instance tracking
+Snapshot observers in MPVLib before dispatching property/event callbacks to avoid holding lock
+Expose isLoadingNewFile and gate debug log loops behind BuildConfig.DEBUG in PlayerViewModel and EngineEventHandler
+Rename test double to MPVLibTestDouble and add unit tests for process-wide ownership guard

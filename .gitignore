@@ -4,10 +4,6 @@
 *.ap_
 *.aab
 
-# Keep local library dependencies in libs/ (e.g. mpv-android-lib-v1.0.0.aar)
-!libs/*.aar
-!libs/*.jar
-
 # Files for the ART/Dalvik VM
 *.dex
 
@@ -76,3 +72,13 @@ desktop.ini
 screenshot.png
 test.mp4
 test_multitrack.mkv
+
+# Local libraries and temporary extraction folders
+libs/
+temp_aar_full/
+temp_check/
+temp_new_aar/
+temp_verify/
+changelog.txt
+classes_trimmed.jar
+classes.jar

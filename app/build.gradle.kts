@@ -72,15 +72,14 @@ android {
         unitTests.isReturnDefaultValues = true
     }
 
-    // Wire the local MPV AAR from the root libs/ folder
     repositories {
         flatDir { dirs(rootProject.file("libs")) }
     }
+
 }
 
 dependencies {
-    // MPV Android AAR — loaded from libs/ in the project root
-    implementation(fileTree(mapOf("dir" to rootProject.file("libs"), "include" to listOf("mpv-android-lib-v1.0.0.aar"))))
+    implementation(fileTree(mapOf("dir" to rootProject.file("libs"), "include" to listOf("mpv-android-lib-v1.0.0-trimmed.aar"))))
 
     implementation(libs.androidx.appcompat)
     implementation(libs.androidx.core.ktx)
