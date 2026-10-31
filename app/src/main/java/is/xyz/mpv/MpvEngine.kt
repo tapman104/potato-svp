@@ -266,14 +266,19 @@ open class MpvEngine(
 
     /** Reset geometry when a new file starts loading, so stale dims aren't briefly reused. */
     fun clearGeometry() {
-        currentGeometry = VideoGeometry()
-        onVideoGeometryChanged?.invoke(currentGeometry)
+        val reset = VideoGeometry()
+        synchronized(lock) {
+            currentGeometry = reset
+        }
+        onVideoGeometryChanged?.invoke(reset)
     }
 
     /** Reset progress when a new file starts loading. */
     fun clearProgress() {
-        currentPositionSec = 0.0
-        currentDurationSec = 0.0
+        synchronized(lock) {
+            currentPositionSec = 0.0
+            currentDurationSec = 0.0
+        }
         onPlaybackProgressChanged?.invoke(0.0, 0.0)
     }
 
@@ -283,10 +288,10 @@ open class MpvEngine(
      * Call this once before the view is destroyed.
      */
     fun destroy() {
+        val shouldDetach: Boolean
         synchronized(lock) {
             onVideoGeometryChanged = null
             onPlaybackProgressChanged = null
-
             pendingSurface = null
             filePath = null
             pendingSurfaceSize = null
@@ -296,16 +301,17 @@ open class MpvEngine(
                 return
             }
 
-            if (isSurfaceAttached) {
-                isSurfaceAttached = false
-                if (isReady) {
-                    detachSurfaceInternal()
-                }
-            }
+            shouldDetach = isSurfaceAttached && isReady
+            if (isSurfaceAttached) isSurfaceAttached = false
+        }
 
+        if (shouldDetach) {
+            detachSurfaceInternal()
+        }
+
+        synchronized(lock) {
             if (isReady || _status.value is EngineStatus.Starting) {
                 try {
-                    // FIX CHECK-A: Route destroy through MpvLifecycleGuard
                     MpvLifecycleGuard.destroy(this)
                 } catch (e: Throwable) {
                     val reason = e.message ?: "Unknown destruction error"
@@ -316,11 +322,9 @@ open class MpvEngine(
                     return
                 }
             }
-
             MPVLib.removeObserver(this)
             MPVLib.removeObserver(eventHandler)
             eventHandler.reset()
-
             _status.value = EngineStatus.NotStarted
         }
     }
@@ -528,13 +532,15 @@ open class MpvEngine(
 
     fun onSurfaceDestroyed() {
         Log.w(TAG, "detaching surface")
+        val shouldDetach: Boolean
         synchronized(lock) {
             pendingSurface = null
             if (!isSurfaceAttached) return
             isSurfaceAttached = false
-            if (isReady) {
-                detachSurfaceInternal()
-            }
+            shouldDetach = isReady
+        }
+        if (shouldDetach) {
+            detachSurfaceInternal()
         }
     }
 
