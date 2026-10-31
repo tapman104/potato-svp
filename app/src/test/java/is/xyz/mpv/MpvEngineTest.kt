@@ -3,7 +3,7 @@ package `is`.xyz.mpv
 import android.content.ContextWrapper
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Before
@@ -242,5 +242,185 @@ class MpvEngineTest {
         engine2.initialize(configDir = "/tmp/config", cacheDir = "/tmp/cache")
         assertEquals(EngineStatus.Ready, engine2.status.value)
         engine2.destroy()
+    }
+
+    @Test
+    fun testInitFailureWithDestroyFailureClearsFieldsAndRetryDestroySucceeds() {
+        val eventHandler = EngineEventHandler()
+        val context = createTestContext()
+        val engine = MpvEngine(context, eventHandler)
+
+        // Set up pre-failure state with closures tracking if old callbacks fire
+        var oldGeometryCalls = 0
+        var oldProgressCalls = 0
+        engine.onVideoGeometryChanged = { oldGeometryCalls++ }
+        engine.onPlaybackProgressChanged = { _, _ -> oldProgressCalls++ }
+        val staleSurface = android.view.Surface(android.graphics.SurfaceTexture(0))
+        engine.onSurfaceCreated(staleSurface)
+        engine.playFile("/path/to/stale.mp4")
+        engine.onSurfaceChanged(1920, 1080)
+
+        // Reset invocation counts caused by playFile's clearGeometry/clearProgress
+        oldGeometryCalls = 0
+        oldProgressCalls = 0
+
+        // Native create succeeds, post-create init throws, AND cleanup destroy throws
+        MPVLib.simulatePostCreateFailure = true
+        MPVLib.simulateDestroyFailure = true
+
+        var threwExpected = false
+        try {
+            engine.initialize(configDir = "/tmp/config", cacheDir = "/tmp/cache")
+        } catch (e: RuntimeException) {
+            assertEquals("Simulated MPVLib.init failure", e.message)
+            threwExpected = true
+        }
+        assertTrue("Expected initialize to throw RuntimeException on post-create failure", threwExpected)
+
+        // Assert status is DestroyFailed
+        assertTrue(engine.status.value is EngineStatus.DestroyFailed)
+
+        // Reset destroy failure so retryDestroy() can succeed
+        MPVLib.simulateDestroyFailure = false
+
+        // Call retryDestroy(), assert it succeeds and status becomes NotStarted
+        engine.retryDestroy()
+        assertEquals(EngineStatus.NotStarted, engine.status.value)
+
+        // Reset post-create failure so re-initialization can succeed
+        MPVLib.simulatePostCreateFailure = false
+
+        // Call engine.initialize() again successfully
+        engine.initialize(configDir = "/tmp/config", cacheDir = "/tmp/cache")
+        assertEquals(EngineStatus.Ready, engine.status.value)
+
+        // (b) Assert no stale surface was auto-attached during initialize() flushPendingLocked()
+        assertTrue("Stale surface must not be auto-attached", MPVLib.attachedSurfaces.isEmpty())
+
+        // (a) Assert no stale file was loaded during initialize() flushPendingLocked()
+        assertTrue("Stale file must not be loaded on initialize", MPVLib.loadedFiles.isEmpty())
+
+        // Normal post-Ready flow: surface arrives and is attached
+        val freshSurface = android.view.Surface(android.graphics.SurfaceTexture(1))
+        engine.onSurfaceCreated(freshSurface)
+        assertEquals(listOf(freshSurface), MPVLib.attachedSurfaces)
+
+        // (a) Assert no stale file was loaded when fresh surface was attached
+        assertTrue("Stale file must not be loaded when fresh surface is attached", MPVLib.loadedFiles.isEmpty())
+
+        // (c) Check geometry and progress callbacks by behavior:
+        // Before setting fresh callbacks, trigger property events and confirm old closures do NOT fire
+        MPVLib.eventProperty("width", 1280L)
+        assertEquals("Old geometry callback must not fire", 0, oldGeometryCalls)
+
+        MPVLib.eventProperty("time-pos", 10.0)
+        assertEquals("Old progress callback must not fire", 0, oldProgressCalls)
+
+        // Set fresh callbacks and confirm they fire when property events occur
+        var freshGeometry: VideoGeometry? = null
+        engine.onVideoGeometryChanged = { freshGeometry = it }
+        var freshPos = 0.0
+        var freshDur = 0.0
+        engine.onPlaybackProgressChanged = { pos, dur ->
+            freshPos = pos
+            freshDur = dur
+        }
+
+        MPVLib.eventProperty("width", 1920L)
+        assertEquals(1920, freshGeometry?.width)
+        assertEquals("Old geometry callback must still not have fired", 0, oldGeometryCalls)
+
+        MPVLib.eventProperty("time-pos", 45.0)
+        assertEquals(45.0, freshPos, 0.001)
+        assertEquals("Old progress callback must still not have fired", 0, oldProgressCalls)
+
+        engine.destroy()
+    }
+
+    @Test
+    fun testInitFailureWithDestroySuccessClearsFieldsImmediately() {
+        val eventHandler = EngineEventHandler()
+        val context = createTestContext()
+        val engine = MpvEngine(context, eventHandler)
+
+        // Set up pre-failure state with closures tracking if old callbacks fire
+        var oldGeometryCalls = 0
+        var oldProgressCalls = 0
+        engine.onVideoGeometryChanged = { oldGeometryCalls++ }
+        engine.onPlaybackProgressChanged = { _, _ -> oldProgressCalls++ }
+        val staleSurface = android.view.Surface(android.graphics.SurfaceTexture(0))
+        engine.onSurfaceCreated(staleSurface)
+        engine.playFile("/path/to/stale.mp4")
+        engine.onSurfaceChanged(1920, 1080)
+
+        // Reset invocation counts caused by playFile's clearGeometry/clearProgress
+        oldGeometryCalls = 0
+        oldProgressCalls = 0
+
+        // Native create succeeds, post-create init throws, cleanup destroy succeeds
+        MPVLib.simulatePostCreateFailure = true
+        MPVLib.simulateDestroyFailure = false
+
+        var threwExpected = false
+        try {
+            engine.initialize(configDir = "/tmp/config", cacheDir = "/tmp/cache")
+        } catch (e: RuntimeException) {
+            assertEquals("Simulated MPVLib.init failure", e.message)
+            threwExpected = true
+        }
+        assertTrue("Expected initialize to throw RuntimeException on post-create failure", threwExpected)
+
+        // Assert status becomes Failed, not DestroyFailed
+        assertTrue(engine.status.value is EngineStatus.Failed)
+        assertFalse(engine.status.value is EngineStatus.DestroyFailed)
+
+        // Reset post-create failure so re-initialization can succeed immediately
+        MPVLib.simulatePostCreateFailure = false
+
+        // Call engine.initialize() again successfully
+        engine.initialize(configDir = "/tmp/config", cacheDir = "/tmp/cache")
+        assertEquals(EngineStatus.Ready, engine.status.value)
+
+        // (b) Assert no stale surface was auto-attached during initialize() flushPendingLocked()
+        assertTrue("Stale surface must not be auto-attached", MPVLib.attachedSurfaces.isEmpty())
+
+        // (a) Assert no stale file was loaded during initialize() flushPendingLocked()
+        assertTrue("Stale file must not be loaded on initialize", MPVLib.loadedFiles.isEmpty())
+
+        // Normal post-Ready flow: surface arrives and is attached
+        val freshSurface = android.view.Surface(android.graphics.SurfaceTexture(1))
+        engine.onSurfaceCreated(freshSurface)
+        assertEquals(listOf(freshSurface), MPVLib.attachedSurfaces)
+
+        // (a) Assert no stale file was loaded when fresh surface was attached
+        assertTrue("Stale file must not be loaded when fresh surface is attached", MPVLib.loadedFiles.isEmpty())
+
+        // (c) Check geometry and progress callbacks by behavior:
+        // Before setting fresh callbacks, trigger property events and confirm old closures do NOT fire
+        MPVLib.eventProperty("width", 1280L)
+        assertEquals("Old geometry callback must not fire", 0, oldGeometryCalls)
+
+        MPVLib.eventProperty("time-pos", 10.0)
+        assertEquals("Old progress callback must not fire", 0, oldProgressCalls)
+
+        // Set fresh callbacks and confirm they fire when property events occur
+        var freshGeometry: VideoGeometry? = null
+        engine.onVideoGeometryChanged = { freshGeometry = it }
+        var freshPos = 0.0
+        var freshDur = 0.0
+        engine.onPlaybackProgressChanged = { pos, dur ->
+            freshPos = pos
+            freshDur = dur
+        }
+
+        MPVLib.eventProperty("width", 1920L)
+        assertEquals(1920, freshGeometry?.width)
+        assertEquals("Old geometry callback must still not have fired", 0, oldGeometryCalls)
+
+        MPVLib.eventProperty("time-pos", 45.0)
+        assertEquals(45.0, freshPos, 0.001)
+        assertEquals("Old progress callback must still not have fired", 0, oldProgressCalls)
+
+        engine.destroy()
     }
 }

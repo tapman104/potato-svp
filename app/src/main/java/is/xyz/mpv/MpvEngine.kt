@@ -25,6 +25,7 @@ sealed interface EngineStatus {
     data object Starting : EngineStatus
     data object Ready : EngineStatus
     data class Failed(val reason: String) : EngineStatus
+    data class DestroyFailed(val reason: String, val retried: Boolean = false) : EngineStatus
 }
 
 open class MpvEngine(
@@ -61,6 +62,10 @@ open class MpvEngine(
      */
     fun initialize(configDir: String, cacheDir: String) {
         synchronized(lock) {
+            if (_status.value is EngineStatus.DestroyFailed) {
+                Log.e(TAG, "initialize called when engine is in DestroyFailed status")
+                return
+            }
             if (_status.value is EngineStatus.Ready || _status.value is EngineStatus.Starting) {
                 Log.w(TAG, "initialize called when engine is already ${_status.value}")
                 return
@@ -102,19 +107,28 @@ open class MpvEngine(
                 Log.i(TAG, "libmpv initialized successfully")
                 flushPendingLocked()
             } catch (e: Throwable) {
+                onVideoGeometryChanged = null
+                onPlaybackProgressChanged = null
+                pendingSurface = null
+                filePath = null
+                pendingSurfaceSize = null
                 val reason = e.message ?: "Unknown initialization error"
                 Log.e(TAG, "libmpv initialization failed: $reason", e)
+                MPVLib.removeObserver(this)
+                MPVLib.removeObserver(eventHandler)
                 if (nativeCreated) {
                     try {
                         // FIX CHECK-A: Route destroy through MpvLifecycleGuard
                         MpvLifecycleGuard.destroy(this)
+                        _status.value = EngineStatus.Failed(reason)
                     } catch (destroyEx: Throwable) {
-                        Log.e(TAG, "Error destroying MPVLib after init failure", destroyEx)
+                        val destroyReason = destroyEx.message ?: "Unknown destruction error"
+                        Log.e(TAG, "Error destroying MPVLib after init failure: $destroyReason", destroyEx)
+                        _status.value = EngineStatus.DestroyFailed(destroyReason)
                     }
+                } else {
+                    _status.value = EngineStatus.Failed(reason)
                 }
-                MPVLib.removeObserver(this)
-                MPVLib.removeObserver(eventHandler)
-                _status.value = EngineStatus.Failed(reason)
                 throw e
             }
         }
@@ -270,9 +284,17 @@ open class MpvEngine(
      */
     fun destroy() {
         synchronized(lock) {
+            onVideoGeometryChanged = null
+            onPlaybackProgressChanged = null
+
             pendingSurface = null
             filePath = null
             pendingSurfaceSize = null
+
+            if (_status.value is EngineStatus.DestroyFailed) {
+                Log.w(TAG, "Native instance remains owned; use retryDestroy()")
+                return
+            }
 
             if (isSurfaceAttached) {
                 isSurfaceAttached = false
@@ -281,15 +303,17 @@ open class MpvEngine(
                 }
             }
 
-            onVideoGeometryChanged = null
-            onPlaybackProgressChanged = null
-
             if (isReady || _status.value is EngineStatus.Starting) {
                 try {
                     // FIX CHECK-A: Route destroy through MpvLifecycleGuard
                     MpvLifecycleGuard.destroy(this)
-                } catch (e: Exception) {
-                    Log.e(TAG, "Error destroying MPVLib", e)
+                } catch (e: Throwable) {
+                    val reason = e.message ?: "Unknown destruction error"
+                    Log.e(TAG, "Error destroying MPVLib: $reason", e)
+                    MPVLib.removeObserver(this)
+                    MPVLib.removeObserver(eventHandler)
+                    _status.value = EngineStatus.DestroyFailed(reason)
+                    return
                 }
             }
 
@@ -298,6 +322,38 @@ open class MpvEngine(
             eventHandler.reset()
 
             _status.value = EngineStatus.NotStarted
+        }
+    }
+
+    /**
+     * Retries destroying libmpv after an initial destroy failure.
+     * Only callable once when [status] is [EngineStatus.DestroyFailed] with retried = false.
+     */
+    fun retryDestroy() {
+        synchronized(lock) {
+            val currentStatus = _status.value
+            if (currentStatus !is EngineStatus.DestroyFailed) {
+                Log.e(TAG, "retryDestroy called when engine status is not DestroyFailed (status is $currentStatus)")
+                return
+            }
+            if (currentStatus.retried) {
+                Log.e(TAG, "retryDestroy already attempted once for this engine; permanent failure")
+                return
+            }
+
+            try {
+                // FIX CHECK-A: Route destroy through MpvLifecycleGuard
+                MpvLifecycleGuard.destroy(this)
+                MPVLib.removeObserver(this)
+                MPVLib.removeObserver(eventHandler)
+                eventHandler.reset()
+                _status.value = EngineStatus.NotStarted
+                Log.i(TAG, "retryDestroy succeeded, status reset to NotStarted")
+            } catch (e: Throwable) {
+                val reason = e.message ?: "Unknown destruction error"
+                Log.e(TAG, "retryDestroy failed: $reason", e)
+                _status.value = EngineStatus.DestroyFailed(reason, retried = true)
+            }
         }
     }
 

@@ -12,6 +12,7 @@ object MPVLib {
 
     var simulateInitFailure: Boolean = false
     var simulatePostCreateFailure: Boolean = false
+    var simulateDestroyFailure: Boolean = false
     var destroyCallCount: Int = 0
 
     fun create(appctx: Context?) {
@@ -28,11 +29,27 @@ object MPVLib {
 
     fun destroy() {
         destroyCallCount++
+        if (simulateDestroyFailure) {
+            throw RuntimeException("Simulated MPVLib.destroy failure")
+        }
     }
-    fun attachSurface(surface: Surface) {}
+    val attachedSurfaces = mutableListOf<Surface>()
+    val loadedFiles = mutableListOf<String>()
+
+    fun attachSurface(surface: Surface) {
+        synchronized(attachedSurfaces) {
+            attachedSurfaces.add(surface)
+        }
+    }
     fun detachSurface() {}
 
-    fun command(cmd: Array<out String>) {}
+    fun command(cmd: Array<out String>) {
+        if (cmd.isNotEmpty() && cmd[0] == "loadfile" && cmd.size > 1) {
+            synchronized(loadedFiles) {
+                loadedFiles.add(cmd[1])
+            }
+        }
+    }
     fun commandNode(cmd: Array<String>): MPVNode? = null
 
     fun setOptionString(name: String, value: String): Int = 0
@@ -73,11 +90,18 @@ object MPVLib {
         synchronized(observedProperties) {
             observedProperties.clear()
         }
+        synchronized(attachedSurfaces) {
+            attachedSurfaces.clear()
+        }
+        synchronized(loadedFiles) {
+            loadedFiles.clear()
+        }
         simulateInitFailure = false
         simulatePostCreateFailure = false
-        destroyCallCount = 0
-        // FIX CHECK-A: Reset lifecycle guard between unit tests
-        MpvLifecycleGuard.resetForTesting()
+        simulateDestroyFailure = false
+        destroyCallCount = 0
+        // FIX CHECK-A: Reset lifecycle guard between unit tests
+        MpvLifecycleGuard.resetForTesting()
     }
 
     @JvmStatic
