@@ -262,11 +262,13 @@ fun PlayScreen(
                 playbackProgressFlow = viewModel.playbackProgress,
                 isEnabled = uiState.isEngineReady,
                 onSeek = { pos ->
-                    resetHideTimer()
                     viewModel.seekTo(pos)
+                    controlsVisible = true
+                    resetHideTimer()
                 },
                 onSeekStarted = {
                     hideJob?.cancel()
+                    controlsVisible = false
                 },
                 modifier = Modifier.fillMaxWidth()
             )
