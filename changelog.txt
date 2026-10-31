@@ -293,3 +293,12 @@ feat(player): add gesture indicator HUD, custom seekbar, and sensor-aware auto o
 - Render custom PlayerSeekBar track and thumb using Canvas
 - Resolve AUTO_BY_VIDEO to SCREEN_ORIENTATION_SENSOR_LANDSCAPE and SCREEN_ORIENTATION_SENSOR_PORTRAIT with normalized rotation
 - Update changelog
+
+
+fix(gestures): clamp zoom scaling, suppress edge swipe conflicts, and fix HUD level
+
+- Clamp pinch zoom scaling between 0.5x and 4x in PlayerViewModel and pass relative factor to engine
+- Display current zoom percentage from StateFlow in GestureIndicator HUD
+- Suppress swipe gestures starting near screen edges in PlayerGestureHandler to prevent system gesture conflicts
+- Ensure long-press speed boost reliably resets on gesture cancel or release via finally block
+- Ignore micro-jitter in pinch zoom gesture detection

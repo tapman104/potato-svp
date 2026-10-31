@@ -63,6 +63,7 @@ fun PlayScreen(
     )
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val currentZoom by viewModel.currentZoom.collectAsState()
     val subFontSize by viewModel.subFontSize.collectAsState()
     val subPos by viewModel.subPos.collectAsState()
     val context = LocalContext.current
@@ -148,7 +149,7 @@ fun PlayScreen(
                     },
                     onZoomBy = {
                         viewModel.zoomBy(it)
-                        indicator = GestureIndicator.Zoom(it)
+                        indicator = GestureIndicator.Zoom(viewModel.currentZoom.value)
                     },
                     onDoubleTap = {
                         controlsVisible = !controlsVisible

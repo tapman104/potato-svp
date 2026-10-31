@@ -30,7 +30,7 @@ sealed interface GestureIndicator {
     data class Volume(val level: Int, val max: Int) : GestureIndicator
     data class Brightness(val level: Float) : GestureIndicator
     data class Speed(val multiplier: Float) : GestureIndicator
-    data class Zoom(val factor: Float) : GestureIndicator
+    data class Zoom(val level: Float) : GestureIndicator
 }
 
 @Composable
@@ -62,7 +62,7 @@ fun GestureIndicatorOverlay(
                 Icons.Filled.Speed to "${indicator.multiplier}x"
             }
             is GestureIndicator.Zoom -> {
-                Icons.Filled.ZoomIn to "${(indicator.factor * 100).toInt()}%"
+                Icons.Filled.ZoomIn to "${(indicator.level * 100).toInt()}%"
             }
         }
 

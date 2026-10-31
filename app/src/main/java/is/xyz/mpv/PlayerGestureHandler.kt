@@ -7,7 +7,6 @@ import android.media.AudioManager
 import android.provider.Settings
 import android.view.Window
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -17,6 +16,7 @@ import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.rememberUpdatedState
 import kotlin.math.abs
@@ -91,18 +91,22 @@ fun Modifier.playerGestureHandler(
                     currentOnSpeedChange.value(2f)
                 },
                 onPress = {
-                    longPressActive = false
-                    speedBeforeLongPress = currentGetCurrentSpeed.value?.invoke() ?: 1f
-                    tryAwaitRelease()
-                    if (longPressActive) {
-                        currentOnSpeedChange.value(speedBeforeLongPress)
+                    try {
                         longPressActive = false
+                        speedBeforeLongPress = currentGetCurrentSpeed.value?.invoke() ?: 1f
+                        tryAwaitRelease()
+                    } finally {
+                        if (longPressActive) {
+                            currentOnSpeedChange.value(speedBeforeLongPress)
+                            longPressActive = false
+                        }
                     }
                 }
             )
         }
         .pointerInput(window, audioManager, seekSecondsPerFullWidth) {
             awaitEachGesture {
+                val edgePx = with(density) { 24.dp.toPx() }
                 var mode = GestureMode.UNDECIDED
                 var totalPanX = 0f
                 var totalPanY = 0f
@@ -110,7 +114,7 @@ fun Modifier.playerGestureHandler(
                 var maxVolume = 1
                 var startBrightness = 0.5f
 
-                awaitFirstDown(requireUnconsumed = false)
+                val firstDownPosition = awaitFirstDown(requireUnconsumed = false).position
 
                 do {
                     val event = awaitPointerEvent()
@@ -125,7 +129,7 @@ fun Modifier.playerGestureHandler(
                     // A two-finger gesture takes priority over one-finger movement.
                     if (pressedCount >= 2) {
                         mode = GestureMode.PINCH
-                        if (zoom.isFinite() && zoom > 0f && zoom != 1f) {
+                        if (zoom.isFinite() && zoom > 0f && abs(zoom - 1f) > 0.001f) {
                             currentOnZoomBy.value(zoom)
                         }
                         event.changes.forEach { if (it.positionChanged()) it.consume() }
@@ -134,7 +138,7 @@ fun Modifier.playerGestureHandler(
 
                     // Once a pinch has started, don't reinterpret the remaining
                     // finger as a swipe in the same gesture.
-                    if (mode == GestureMode.PINCH) {
+                    if (mode == GestureMode.PINCH || mode == GestureMode.SUPPRESSED) {
                         event.changes.forEach { if (it.positionChanged()) it.consume() }
                         continue
                     }
@@ -150,10 +154,26 @@ fun Modifier.playerGestureHandler(
 
                         mode = if (abs(totalPanX) > abs(totalPanY)) {
                             GestureMode.SEEK
-                        } else if (centroid.x < size.width / 2f) {
+                        } else if (firstDownPosition.x < size.width / 2f) {
                             GestureMode.BRIGHTNESS
                         } else {
                             GestureMode.VOLUME
+                        }
+
+                        if (mode == GestureMode.SEEK) {
+                            val swipingRight = totalPanX > 0f
+                            val swipingLeft = totalPanX < 0f
+                            val nearLeftEdge = firstDownPosition.x <= edgePx
+                            val nearRightEdge = firstDownPosition.x >= size.width - edgePx
+                            if ((nearLeftEdge && swipingRight) || (nearRightEdge && swipingLeft)) {
+                                mode = GestureMode.SUPPRESSED
+                            }
+                        } else if (mode == GestureMode.BRIGHTNESS || mode == GestureMode.VOLUME) {
+                            val swipingDown = totalPanY > 0f
+                            val nearTopEdge = firstDownPosition.y <= edgePx
+                            if (nearTopEdge && swipingDown) {
+                                mode = GestureMode.SUPPRESSED
+                            }
                         }
 
                         if (mode == GestureMode.VOLUME) {
@@ -192,7 +212,8 @@ fun Modifier.playerGestureHandler(
                         }
 
                         GestureMode.UNDECIDED,
-                        GestureMode.PINCH -> Unit
+                        GestureMode.PINCH,
+                        GestureMode.SUPPRESSED -> Unit
                     }
 
                     if (mode != GestureMode.UNDECIDED) {
@@ -209,6 +230,7 @@ private enum class GestureMode {
     VOLUME,
     BRIGHTNESS,
     PINCH,
+    SUPPRESSED,
 }
 
 private fun currentSystemBrightness(context: Context): Float {
