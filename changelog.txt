@@ -285,3 +285,11 @@ feat(player): add gesture indicator HUD, custom seekbar, and sensor-aware auto o
 - Add volume and brightness change callbacks to PlayerGestureHandler
 - Render custom PlayerSeekBar track and thumb using Canvas
 - Resolve AUTO_BY_VIDEO to SCREEN_ORIENTATION_SENSOR_LANDSCAPE and SCREEN_ORIENTATION_SENSOR_PORTRAIT with normalized rotation
+
+feat(player): add gesture indicator HUD, custom seekbar, and sensor-aware auto orientation
+
+- Add GestureIndicator overlay for seek, volume, brightness, speed boost, and pinch zoom feedback
+- Add volume and brightness change callbacks to PlayerGestureHandler
+- Render custom PlayerSeekBar track and thumb using Canvas
+- Resolve AUTO_BY_VIDEO to SCREEN_ORIENTATION_SENSOR_LANDSCAPE and SCREEN_ORIENTATION_SENSOR_PORTRAIT with normalized rotation
+- Update changelog
