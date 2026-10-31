@@ -109,6 +109,9 @@ class PlayerViewModel(
     private val _playbackProgress = MutableStateFlow(PlaybackProgress())
     val playbackProgress: StateFlow<PlaybackProgress> = _playbackProgress.asStateFlow()
 
+    private val _playbackSpeed = MutableStateFlow(1f)
+    val playbackSpeed: StateFlow<Float> = _playbackSpeed.asStateFlow()
+
     private val _videoGeometry = MutableStateFlow(VideoGeometry())
 
     /**
@@ -210,6 +213,7 @@ class PlayerViewModel(
         Log.i(TAG, "loadFile: path=$path, name=$name")
         _explicitFileName.value = name
         _playbackProgress.value = PlaybackProgress()
+        _playbackSpeed.value = 1f
         // FIX #5: Set isLoadingNewFile true before calling engine.playFile
         _isLoadingNewFile.value = true
         engine.playFile(path)
@@ -222,6 +226,24 @@ class PlayerViewModel(
     fun seekTo(positionSec: Double) {
         Log.i(TAG, "seekTo: $positionSec")
         engine.seekTo(positionSec)
+    }
+
+    fun seekBy(offsetSec: Double) {
+        Log.i(TAG, "seekBy: $offsetSec")
+        engine.seekBy(offsetSec)
+    }
+
+    fun setSpeed(speed: Double) {
+        Log.i(TAG, "setSpeed: $speed")
+        _playbackSpeed.value = speed.toFloat()
+        engine.setSpeed(speed)
+    }
+
+    fun getCurrentSpeed(): Float = _playbackSpeed.value
+
+    fun zoomBy(factor: Float) {
+        Log.i(TAG, "zoomBy: $factor")
+        engine.zoomBy(factor)
     }
 
     fun selectAudioTrack(id: Int) {

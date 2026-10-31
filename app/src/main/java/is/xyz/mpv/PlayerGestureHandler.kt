@@ -1,0 +1,230 @@
+package `is`.xyz.mpv
+
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
+import android.media.AudioManager
+import android.provider.Settings
+import android.view.Window
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculateCentroid
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.ui.input.pointer.positionChanged
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.rememberUpdatedState
+import kotlin.math.abs
+import kotlin.math.roundToInt
+
+/**
+ * UI-only gesture handling for the video surface.
+ *
+ * This file detects gestures and handles Android window brightness / media volume.
+ * Playback operations are supplied by PlayScreen through callbacks. No gesture
+ * state or gesture-specific API is added to PlayerViewModel.
+ *
+ * Gesture mapping:
+ * - Double tap left/right: seek backward/forward.
+ * - Long press: temporarily request 2x playback speed; restore to 1x on release.
+ * - Vertical drag on left half: screen brightness.
+ * - Vertical drag on right half: media volume.
+ * - Horizontal drag: relative seek.
+ * - Pinch: report incremental zoom factor to the caller.
+ *
+ * Attach this modifier to the video-area container, not to the entire screen
+ * containing buttons, sliders, or dialogs.
+ */
+@Composable
+fun Modifier.playerGestureHandler(
+    onSeekBy: (Double) -> Unit,
+    onSpeedChange: (Float) -> Unit,
+    onZoomBy: (Float) -> Unit,
+    onSingleTap: (() -> Unit)? = null,
+    onDoubleTap: (() -> Unit)? = null,
+    seekSecondsPerFullWidth: Float = 150f,
+    getCurrentSpeed: (() -> Float)? = null,
+): Modifier {
+    val context = LocalContext.current
+    val activity = context.findActivity()
+    val window = activity?.window
+    val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+
+    val currentOnSeekBy = rememberUpdatedState(onSeekBy)
+    val currentOnSpeedChange = rememberUpdatedState(onSpeedChange)
+    val currentOnZoomBy = rememberUpdatedState(onZoomBy)
+    val currentOnSingleTap = rememberUpdatedState(onSingleTap)
+    val currentOnDoubleTap = rememberUpdatedState(onDoubleTap)
+    val currentGetCurrentSpeed = rememberUpdatedState(getCurrentSpeed)
+
+    return this
+        // Tap/long-press and swipe/pinch are in separate pointerInput modifiers so that
+        // detectTapGestures can own its tap disambiguation timing independently of the
+        // awaitEachGesture loop. Both modifiers use requireUnconsumed = false on the initial
+        // down so that neither starves the other.
+        .pointerInput(Unit) {
+            var longPressActive = false
+            var speedBeforeLongPress = 1f
+
+            detectTapGestures(
+                onTap = {
+                    currentOnSingleTap.value?.invoke()
+                },
+                onDoubleTap = { position ->
+                    when {
+                        position.x <= size.width * 0.28f -> currentOnSeekBy.value(-10.0)
+                        position.x >= size.width * 0.72f -> currentOnSeekBy.value(10.0)
+                        else -> currentOnDoubleTap.value?.invoke()
+                    }
+                },
+                onLongPress = {
+                    longPressActive = true
+                    currentOnSpeedChange.value(2f)
+                },
+                onPress = {
+                    longPressActive = false
+                    speedBeforeLongPress = currentGetCurrentSpeed.value?.invoke() ?: 1f
+                    tryAwaitRelease()
+                    if (longPressActive) {
+                        currentOnSpeedChange.value(speedBeforeLongPress)
+                        longPressActive = false
+                    }
+                }
+            )
+        }
+        .pointerInput(window, audioManager, seekSecondsPerFullWidth) {
+            awaitEachGesture {
+                var mode = GestureMode.UNDECIDED
+                var totalPanX = 0f
+                var totalPanY = 0f
+                var startVolume = 0
+                var maxVolume = 1
+                var startBrightness = 0.5f
+
+                awaitFirstDown(requireUnconsumed = false)
+
+                do {
+                    val event = awaitPointerEvent()
+                    val pressedCount = event.changes.count { it.pressed }
+
+                    if (pressedCount == 0) break
+
+                    val pan = event.calculatePan()
+                    val zoom = event.calculateZoom()
+                    val centroid = event.calculateCentroid(useCurrent = true)
+
+                    // A two-finger gesture takes priority over one-finger movement.
+                    if (pressedCount >= 2) {
+                        mode = GestureMode.PINCH
+                        if (zoom.isFinite() && zoom > 0f && zoom != 1f) {
+                            currentOnZoomBy.value(zoom)
+                        }
+                        event.changes.forEach { if (it.positionChanged()) it.consume() }
+                        continue
+                    }
+
+                    // Once a pinch has started, don't reinterpret the remaining
+                    // finger as a swipe in the same gesture.
+                    if (mode == GestureMode.PINCH) {
+                        event.changes.forEach { if (it.positionChanged()) it.consume() }
+                        continue
+                    }
+
+                    totalPanX += pan.x
+                    totalPanY += pan.y
+
+                    if (mode == GestureMode.UNDECIDED) {
+                        val touchSlop = viewConfiguration.touchSlop
+                        if (abs(totalPanX) < touchSlop && abs(totalPanY) < touchSlop) {
+                            continue
+                        }
+
+                        mode = if (abs(totalPanX) > abs(totalPanY)) {
+                            GestureMode.SEEK
+                        } else if (centroid.x < size.width / 2f) {
+                            GestureMode.BRIGHTNESS
+                        } else {
+                            GestureMode.VOLUME
+                        }
+
+                        if (mode == GestureMode.VOLUME) {
+                            startVolume = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
+                            maxVolume = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+                                .coerceAtLeast(1)
+                        } else if (mode == GestureMode.BRIGHTNESS) {
+                            startBrightness = window?.attributes?.screenBrightness
+                                ?.takeIf { it >= 0f }
+                                ?: currentSystemBrightness(context)
+                        }
+                    }
+
+                    when (mode) {
+                        GestureMode.SEEK -> {
+                            val width = size.width.toFloat().coerceAtLeast(1f)
+                            currentOnSeekBy.value(
+                                (pan.x / width * seekSecondsPerFullWidth).toDouble()
+                            )
+                        }
+
+                        GestureMode.VOLUME -> {
+                            val height = size.height.toFloat().coerceAtLeast(1f)
+                            val change = (-totalPanY / height * maxVolume * 1.5f).roundToInt()
+                            val target = (startVolume + change).coerceIn(0, maxVolume)
+                            audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, target, 0)
+                        }
+
+                        GestureMode.BRIGHTNESS -> {
+                            val height = size.height.toFloat().coerceAtLeast(1f)
+                            val change = -totalPanY / height * 1.5f
+                            val target = (startBrightness + change).coerceIn(0f, 1f)
+                            window?.updateBrightness(target)
+                        }
+
+                        GestureMode.UNDECIDED,
+                        GestureMode.PINCH -> Unit
+                    }
+
+                    if (mode != GestureMode.UNDECIDED) {
+                        event.changes.forEach { if (it.positionChanged()) it.consume() }
+                    }
+                } while (event.changes.any { it.pressed })
+            }
+        }
+}
+
+private enum class GestureMode {
+    UNDECIDED,
+    SEEK,
+    VOLUME,
+    BRIGHTNESS,
+    PINCH,
+}
+
+private fun currentSystemBrightness(context: Context): Float {
+    return try {
+        val raw = Settings.System.getInt(
+            context.contentResolver,
+            Settings.System.SCREEN_BRIGHTNESS
+        )
+        (raw / 255f).coerceIn(0f, 1f)
+    } catch (_: Exception) {
+        0.5f
+    }
+}
+
+private fun Window.updateBrightness(value: Float) {
+    val params = attributes
+    params.screenBrightness = value.coerceIn(0f, 1f)
+    attributes = params
+}
+
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
+}

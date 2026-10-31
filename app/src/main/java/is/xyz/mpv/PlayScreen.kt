@@ -6,7 +6,6 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -113,24 +112,35 @@ fun PlayScreen(
             modifier = Modifier.fillMaxSize()
         )
 
-        // Mid layer: Tap detector over empty video area.
-        // Child interactive controls (IconButton, Slider) consume pointer down events
-        // via their internal clickable/drag gestures. Because detectTapGestures relies on
-        // awaitFirstDown(requireUnconsumed = true), it ignores already-consumed down events,
-        // preventing button and seek bar taps from leaking through to toggle controlsVisible.
+        // Mid layer: unified gesture surface.
+        // playerGestureHandler uses detectTapGestures (requireUnconsumed = true) for taps/long-press
+        // and awaitEachGesture (requireUnconsumed = false) for swipe/pinch, so interactive controls
+        // drawn above (IconButton, Slider) still consume their own down events without interference.
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .pointerInput(Unit) {
-                    detectTapGestures(
-                        onTap = {
-                            if (activeDialog == TrackDialogType.NONE) {
-                                controlsVisible = !controlsVisible
-                                if (controlsVisible) resetHideTimer()
-                            }
+                .playerGestureHandler(
+                    onSingleTap = {
+                        if (activeDialog == TrackDialogType.NONE) {
+                            controlsVisible = !controlsVisible
+                            if (controlsVisible) resetHideTimer()
                         }
-                    )
-                }
+                    },
+                    onSeekBy = {
+                        resetHideTimer()
+                        viewModel.seekBy(it)
+                    },
+                    onSpeedChange = { viewModel.setSpeed(it.toDouble()) },
+                    onZoomBy = {
+                        resetHideTimer()
+                        viewModel.zoomBy(it)
+                    },
+                    onDoubleTap = {
+                        controlsVisible = !controlsVisible
+                        if (controlsVisible) resetHideTimer()
+                    },
+                    getCurrentSpeed = { viewModel.getCurrentSpeed() },
+                )
         )
 
         // Overlay: Center play/pause button
@@ -305,4 +315,3 @@ private fun PlayerBottomBarHost(
         modifier = modifier
     )
 }
-

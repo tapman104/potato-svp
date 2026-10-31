@@ -409,6 +409,45 @@ open class MpvEngine(
     }
 
     /**
+     * Seek by a relative offset in seconds (negative seeks backward).
+     * mpv resolves the offset against its own current position — no round
+     * trip through a cached position value. Guarded by [isReady].
+     */
+    fun seekBy(offsetSec: Double) {
+        synchronized(lock) {
+            if (!isReady) return
+            MPVLib.command(arrayOf("seek", offsetSec.toString(), "relative"))
+        }
+    }
+
+    /**
+     * Set playback speed as a multiplier (1.0 = normal). Guarded by [isReady].
+     */
+    fun setSpeed(speed: Double) {
+        synchronized(lock) {
+            if (!isReady) return
+            MPVLib.setPropertyDouble("speed", speed)
+        }
+    }
+
+    /**
+     * Apply an incremental zoom factor from a pinch gesture (e.g. 1.05 per
+     * frame). Converts the multiplicative gesture delta into mpv's
+     * logarithmic video-zoom property and writes the accumulated value back.
+     * Guarded by [isReady].
+     */
+    fun zoomBy(factor: Float) {
+        synchronized(lock) {
+            if (!isReady) return
+            if (!factor.isFinite() || factor <= 0f) return
+            val currentZoom = MPVLib.getPropertyDouble("video-zoom") ?: 0.0
+            val delta = kotlin.math.ln(factor.toDouble()) / kotlin.math.ln(2.0)
+            val next = currentZoom + delta
+            MPVLib.setPropertyDouble("video-zoom", next)
+        }
+    }
+
+    /**
      * Fetch the current track list node from mpv. Guarded by [isReady].
      */
     fun getTrackList(): MPVNode? {
