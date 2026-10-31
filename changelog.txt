@@ -265,3 +265,23 @@ fix(lifecycle): handle destruction failure on init and clear pending state
 - Revert mutable pending state visibility back to private
 - Add attachedSurfaces and loadedFiles tracking to MPVLibTestDouble
 - Harden regression tests with specific exception assertions and behavioral checks
+
+
+feat(player): implement playback and transform gestures with unified touch handling
+
+Add PlayerGestureHandler with tap, double-tap seek, long-press 2x speed boost, volume/brightness drag, horizontal seek, and pinch zoom
+
+Expose seekBy, setSpeed, getCurrentSpeed, and zoomBy in PlayerViewModel and MpvEngine
+
+Integrate playerGestureHandler on PlayScreen overlay with single-tap and center double-tap controls toggle
+
+
+
+
+
+feat(player): add gesture indicator HUD, custom seekbar, and sensor-aware auto orientation
+
+- Add GestureIndicator overlay for seek, volume, brightness, speed boost, and pinch zoom feedback
+- Add volume and brightness change callbacks to PlayerGestureHandler
+- Render custom PlayerSeekBar track and thumb using Canvas
+- Resolve AUTO_BY_VIDEO to SCREEN_ORIENTATION_SENSOR_LANDSCAPE and SCREEN_ORIENTATION_SENSOR_PORTRAIT with normalized rotation

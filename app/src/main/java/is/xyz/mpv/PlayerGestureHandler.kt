@@ -49,6 +49,8 @@ fun Modifier.playerGestureHandler(
     onDoubleTap: (() -> Unit)? = null,
     seekSecondsPerFullWidth: Float = 150f,
     getCurrentSpeed: (() -> Float)? = null,
+    onVolumeChange: ((level: Int, max: Int) -> Unit)? = null,
+    onBrightnessChange: ((level: Float) -> Unit)? = null,
 ): Modifier {
     val context = LocalContext.current
     val activity = context.findActivity()
@@ -61,6 +63,8 @@ fun Modifier.playerGestureHandler(
     val currentOnSingleTap = rememberUpdatedState(onSingleTap)
     val currentOnDoubleTap = rememberUpdatedState(onDoubleTap)
     val currentGetCurrentSpeed = rememberUpdatedState(getCurrentSpeed)
+    val currentOnVolumeChange = rememberUpdatedState(onVolumeChange)
+    val currentOnBrightnessChange = rememberUpdatedState(onBrightnessChange)
 
     return this
         // Tap/long-press and swipe/pinch are in separate pointerInput modifiers so that
@@ -176,6 +180,7 @@ fun Modifier.playerGestureHandler(
                             val change = (-totalPanY / height * maxVolume * 1.5f).roundToInt()
                             val target = (startVolume + change).coerceIn(0, maxVolume)
                             audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, target, 0)
+                            currentOnVolumeChange.value?.invoke(target, maxVolume)
                         }
 
                         GestureMode.BRIGHTNESS -> {
@@ -183,6 +188,7 @@ fun Modifier.playerGestureHandler(
                             val change = -totalPanY / height * 1.5f
                             val target = (startBrightness + change).coerceIn(0f, 1f)
                             window?.updateBrightness(target)
+                            currentOnBrightnessChange.value?.invoke(target)
                         }
 
                         GestureMode.UNDECIDED,

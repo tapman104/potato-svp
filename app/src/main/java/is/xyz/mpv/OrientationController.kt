@@ -39,18 +39,17 @@ class OrientationController {
 
             OrientationMode.AUTO_BY_VIDEO -> {
                 if (input.videoWidth <= 0 || input.videoHeight <= 0) {
-                    // No dimensions yet (e.g. file still loading) — don't force a guess.
                     OrientationResult.FollowSystem
                 } else {
-                    val isSwapped = input.videoRotationDegrees == 90 ||
-                        input.videoRotationDegrees == 270
+                    val rotation = ((input.videoRotationDegrees % 360) + 360) % 360
+                    val isSwapped = rotation == 90 || rotation == 270
                     val effectiveW = if (isSwapped) input.videoHeight else input.videoWidth
                     val effectiveH = if (isSwapped) input.videoWidth else input.videoHeight
 
                     val orientation = if (effectiveW >= effectiveH)
-                        ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+                        ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
                     else
-                        ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                        ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
 
                     OrientationResult.Locked(orientation)
                 }

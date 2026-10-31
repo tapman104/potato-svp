@@ -34,6 +34,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import `is`.xyz.mpv.ui.AudioTrackDialog
+import `is`.xyz.mpv.ui.GestureIndicator
+import `is`.xyz.mpv.ui.GestureIndicatorOverlay
 import `is`.xyz.mpv.ui.PlayerBottomBar
 import `is`.xyz.mpv.ui.PlayerTopBar
 import `is`.xyz.mpv.ui.SubtitleTrackDialog
@@ -68,6 +70,7 @@ fun PlayScreen(
 
     var controlsVisible by remember { mutableStateOf(true) }
     var activeDialog by remember { mutableStateOf(TrackDialogType.NONE) }
+    var indicator by remember { mutableStateOf<GestureIndicator?>(null) }
     val coroutineScope = rememberCoroutineScope()
     var hideJob by remember { mutableStateOf<Job?>(null) }
 
@@ -76,6 +79,15 @@ fun PlayScreen(
         hideJob = coroutineScope.launch {
             delay(5_000)
             controlsVisible = false
+        }
+    }
+
+    LaunchedEffect(indicator) {
+        if (indicator != null) {
+            hideJob?.cancel()
+            controlsVisible = false
+            delay(600)
+            indicator = null
         }
     }
 
@@ -127,19 +139,28 @@ fun PlayScreen(
                         }
                     },
                     onSeekBy = {
-                        resetHideTimer()
                         viewModel.seekBy(it)
+                        indicator = GestureIndicator.Seek(it)
                     },
-                    onSpeedChange = { viewModel.setSpeed(it.toDouble()) },
+                    onSpeedChange = {
+                        viewModel.setSpeed(it.toDouble())
+                        indicator = GestureIndicator.Speed(it)
+                    },
                     onZoomBy = {
-                        resetHideTimer()
                         viewModel.zoomBy(it)
+                        indicator = GestureIndicator.Zoom(it)
                     },
                     onDoubleTap = {
                         controlsVisible = !controlsVisible
                         if (controlsVisible) resetHideTimer()
                     },
                     getCurrentSpeed = { viewModel.getCurrentSpeed() },
+                    onVolumeChange = { level, max ->
+                        indicator = GestureIndicator.Volume(level, max)
+                    },
+                    onBrightnessChange = { level ->
+                        indicator = GestureIndicator.Brightness(level)
+                    },
                 )
         )
 
@@ -157,16 +178,17 @@ fun PlayScreen(
                         resetHideTimer()
                         viewModel.togglePlayPause()
                     },
-                    enabled = uiState.isEngineReady && uiState.isPlaying != null
+                    enabled = uiState.isEngineReady && uiState.isPlaying != null,
+                    modifier = Modifier.size(80.dp)
                 ) {
                     Box(
                         contentAlignment = Alignment.Center,
                         modifier = Modifier
+                            .fillMaxSize()
                             .background(
                                 color = Color.Black.copy(alpha = 0.4f),
                                 shape = CircleShape
                             )
-                            .padding(14.dp)
                     ) {
                         when (uiState.isPlaying) {
                             true -> Icon(
@@ -182,7 +204,7 @@ fun PlayScreen(
                                 modifier = Modifier.size(52.dp)
                             )
                             null -> CircularProgressIndicator(
-                                modifier = Modifier.size(48.dp),
+                                modifier = Modifier.size(40.dp),
                                 color = Color.White,
                                 strokeWidth = 3.dp
                             )
@@ -248,6 +270,20 @@ fun PlayScreen(
                 modifier = Modifier.fillMaxWidth()
             )
         }
+
+        // Overlay: Gesture indicators
+        GestureIndicatorOverlay(
+            indicator = indicator.takeIf { it is GestureIndicator.Brightness },
+            modifier = Modifier.align(Alignment.CenterEnd).padding(end = 24.dp)
+        )
+        GestureIndicatorOverlay(
+            indicator = indicator.takeIf { it is GestureIndicator.Volume },
+            modifier = Modifier.align(Alignment.CenterStart).padding(start = 24.dp)
+        )
+        GestureIndicatorOverlay(
+            indicator = indicator.takeIf { it !is GestureIndicator.Brightness && it !is GestureIndicator.Volume },
+            modifier = Modifier.align(Alignment.Center)
+        )
 
         // Track Selection Dialogs
         when (activeDialog) {
