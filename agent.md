@@ -37,7 +37,7 @@ Follow the actual repository structure. Do not assume modules, classes, or archi
 This boundary is frozen. Do not restructure it.
 
 ```
-MPVLib  →  MpvEngine + EngineEventHandler  →  PlayerViewModel
+MPVLib  →  MpvLifecycleGuard  →  MpvEngine + EngineEventHandler  →  PlayerViewModel
 ```
 
 **`MPVLib`** — Native/JNI boundary. Do not modify.
@@ -45,10 +45,19 @@ MPVLib  →  MpvEngine + EngineEventHandler  →  PlayerViewModel
 - Sole path for all JNI and native calls.
 - Dispatches raw property events to registered observers.
 
+**`MpvLifecycleGuard`** — Sole authority on native instance ownership.
+
+- Tracks which `MpvEngine` instance, if any, currently owns the single native MPV instance.
+- `MPVLib.destroy()` is called **only** from inside `MpvLifecycleGuard.destroy()`. No other class calls it, including `MpvEngine` — `MpvEngine` always goes through the Guard.
+- Releases ownership only after `MPVLib.destroy()` returns successfully. If it throws, the Guard deliberately retains ownership rather than guessing the native instance is gone.
+- Do not add a second ownership flag anywhere else (e.g. an `ownsNativeInstance` bool on `MpvEngine`). The Guard's `owner` field is the single source of truth — duplicating it was explicitly rejected during the destroy-failure lifecycle fix.
+- Lock-ordering rule (see comment in the file): any caller holding `MpvEngine.lock` before entering a `@Synchronized` method on the Guard must never acquire `MpvEngine.lock` again from inside the Guard. Current call paths (`initialize`, `destroy`, `retryDestroy`) all acquire `MpvEngine.lock` first, then the Guard's intrinsic lock. Preserve this order in any new call site.
+
 **`MpvEngine`** — Native lifecycle and commands.
 
 - Owns: initialization, cleanup, observer registration, surface lifecycle, file loading, playback commands, geometry, and progress.
-- Calls `eventHandler.reset()` at start of `playFile()` (file switch) and in `destroy()` (full teardown).
+- Calls `eventHandler.reset()` at start of `playFile()` (file switch) and in `destroy()` (full teardown) — but only when native destroy actually succeeded; see `DestroyFailed` below.
+- Routes all native create/destroy calls through `MpvLifecycleGuard`, never `MPVLib` directly.
 
 **`EngineEventHandler`** — Event-to-state translation.
 
@@ -57,15 +66,25 @@ MPVLib  →  MpvEngine + EngineEventHandler  →  PlayerViewModel
 - Resets all state on `reset()`.
 - `reset()` clears event-derived application state only. It must not initialize, destroy, or otherwise manage the native MPV instance.
 
+**`EngineStatus.DestroyFailed` — native destruction failure handling:**
+
+- If `MPVLib.destroy()` throws (during `initialize()`'s failure cleanup, or during `destroy()`), the engine's status becomes `DestroyFailed(reason, retried: Boolean)` instead of silently reporting `NotStarted` or `Failed`. The native instance's ownership state is uncertain at that point, and the engine must never claim otherwise.
+- While `DestroyFailed`, `initialize()` refuses to run (logs and returns) and `destroy()` refuses to re-attempt native teardown (it still clears Kotlin-side state — callbacks, pending surface/file — so it stays safe to call repeatedly, but it does not touch the Guard again).
+- `retryDestroy()` is the **only** recovery path out of `DestroyFailed`. It is capped at one retry (`retried: Boolean`, not a counter) — if the retry also fails, the engine stays `DestroyFailed` permanently until process restart. Do not add automatic or repeated retries; a native library that may still be partially alive must not be assumed safe to destroy repeatedly.
+- **Known gap**: nothing in `PlayerViewModel` currently calls `retryDestroy()`. `DestroyFailed` is effectively terminal in the live app today. This is a deliberate fail-closed default, not an oversight — don't silently wire up a caller without deciding, as a product question, whether/how a destroy failure should surface to the user.
+- JVM unit tests (`MpvEngineTest.kt`) prove the Kotlin-side contract (status transitions, state clearing, no stale callbacks/surfaces/files after recovery). They cannot prove that calling native `MPVLib.destroy()` a second time is actually safe on a real device after a partial failure — that depends on mpv's native internals and is outside what this layer can observe or guard against.
+
 **Rules that cannot be changed without explicit justification:**
 
 1. `MPVLib` stays unchanged. It is the JNI/native API boundary.
 2. Exactly **two** native observers: `MpvEngine` and `EngineEventHandler`. No other class registers directly with `MPVLib`.
-3. `MpvEngine` owns all native lifecycle. No other class calls initialization, cleanup, or surface management.
+3. `MpvEngine` owns all native lifecycle. No other class calls initialization, cleanup, or surface management. All native destroy calls route through `MpvLifecycleGuard`, never `MPVLib.destroy()` directly.
 4. `EngineEventHandler` owns all event-to-state translation. No parallel state owners for the same property.
 5. One authoritative state per concern. `isEngineReady` derives from `engineStatus`; `isPlaying` is nullable `Boolean?` — `null` is a real state meaning "not yet known," not a bug.
 6. Loading a new file resets stale track/playback state via `eventHandler.reset()` in `playFile()`.
 7. No premature abstractions. Do not split out audio/subtitle controllers or add a new layer without a concrete failing requirement.
+8. `MpvLifecycleGuard` is the sole owner of native-instance ownership tracking. Do not duplicate it with a second flag on `MpvEngine` or elsewhere.
+9. `DestroyFailed` recovery goes through `retryDestroy()` only, capped at one attempt. Do not add automatic retries or a retry counter.
 
 ### Activity
 

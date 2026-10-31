@@ -29,6 +29,7 @@ No ExoPlayer. No XML layouts. No Hilt. No navigation framework.
 | `PlayScreen.kt` | Root composable — `Box` stacking video + bars |
 | `PlayerViewModel.kt` | Coordinates engine commands; consumes state from `EngineEventHandler`; does not register with `MPVLib` directly |
 | `MpvEngine.kt` | MPV init, surface attach, observer registration, file loading, playback commands |
+| `MpvLifecycleGuard.kt` | Sole authority on native instance ownership; only caller of `MPVLib.destroy()` |
 | `EngineEventHandler.kt` | Translates native property events into typed `StateFlow`s; owns track state, pause state, media title |
 | `MPVLib.kt` | JNI bridge — all native calls go here; do not modify |
 | `PlayerTopBar.kt` | Top overlay bar composable |
@@ -53,6 +54,16 @@ Native libmpv
   → Composables recompose
 ```
 
+Native lifecycle (init/destroy) is a separate path from event dispatch above:
+
+```
+MpvEngine.initialize() / destroy() / retryDestroy()
+  → MpvLifecycleGuard.create() / destroy()   (sole owner of native ownership state)
+  → MPVLib.create() / MPVLib.destroy()
+```
+
+`MpvEngine` never calls `MPVLib.create()`/`MPVLib.destroy()` directly — always through `MpvLifecycleGuard`.
+
 ---
 
 ## Locked Architecture — MPV Engine Boundary
@@ -60,12 +71,13 @@ Native libmpv
 This boundary is frozen. Do not restructure it without explicit justification.
 
 ```
-MPVLib  →  MpvEngine + EngineEventHandler  →  PlayerViewModel
+MPVLib  →  MpvLifecycleGuard  →  MpvEngine + EngineEventHandler  →  PlayerViewModel
 ```
 
 | Component | Owns |
 | --- | --- |
 | `MPVLib` | JNI/native API boundary; unchanged |
+| `MpvLifecycleGuard` | Sole authority on native instance ownership; only caller of `MPVLib.destroy()`; retains ownership if destroy throws |
 | `MpvEngine` | Native lifecycle, init/teardown, observer registration, surface, file loading, playback commands |
 | `EngineEventHandler` | Event-to-state translation; track state, pause state, media title, selected IDs; resets on file switch |
 | `PlayerViewModel` | Engine command dispatch; consumes `EngineEventHandler` state; no direct `MPVLib` registration |
@@ -75,7 +87,8 @@ MPVLib  →  MpvEngine + EngineEventHandler  →  PlayerViewModel
 - Exactly two native observers: `MpvEngine` and `EngineEventHandler`. No others.
 - `MPVLib` is not modified.
 - No duplicate state owners for the same property.
-- `eventHandler.reset()` is called in both `playFile()` (file switch) and `destroy()` (teardown).
+- `eventHandler.reset()` is called in both `playFile()` (file switch) and `destroy()` (teardown) — but not when a destroy attempt fails; see `DestroyFailed` below.
+- No class other than `MpvLifecycleGuard` calls `MPVLib.destroy()`. No second ownership flag duplicates the Guard's tracking.
 
 ---
 
@@ -86,6 +99,7 @@ MPVLib  →  MpvEngine + EngineEventHandler  →  PlayerViewModel
 - **Track state reset**: `EngineEventHandler.reset()` is called at the start of `MpvEngine.playFile()` to clear stale track list, selected IDs, and media title before a new file loads.
 - **Controls visibility**: transient UI state, lives in `PlayScreen` (not ViewModel). Single tap toggles. Auto-hides after 5 seconds via coroutine in `LaunchedEffect`.
 - **No polling**: all property updates via `observeProperty`. No timers or repeated reads for playback state.
+- **Native destroy failure (`EngineStatus.DestroyFailed`)**: if `MPVLib.destroy()` throws, the engine does not assume the native instance is gone. Status becomes `DestroyFailed(reason, retried)` instead of `NotStarted`/`Failed`. `MpvLifecycleGuard` keeps ownership. The only way out is `retryDestroy()`, capped at exactly one attempt — if that also fails, the engine stays `DestroyFailed` until process restart. No automatic or repeated retries.
 
 ---
 
@@ -98,6 +112,7 @@ MPVLib  →  MpvEngine + EngineEventHandler  →  PlayerViewModel
 - No use case classes
 - No ExoPlayer or MediaSession
 - No audio/subtitle controller classes (do not create without a concrete failing requirement)
+- **No caller of `MpvEngine.retryDestroy()` in `PlayerViewModel` yet.** `DestroyFailed` is reachable but effectively terminal in the live app today — this is a deliberate fail-closed default, not a bug. Don't wire up a caller without first deciding, as a product decision, how a destroy failure should surface to the user.
 
 ---
 
